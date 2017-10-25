@@ -1,0 +1,30 @@
+# Makefile for sequential approximation field module
+
+# standard quadratic approximation
+$(MOD_FEM_OBJ_DIR)/apl_std_quad_lib.a: \
+      $(MOD_FEM_OBJ_DIR)/aps_std_quad_intf.o \
+      $(MOD_FEM_OBJ_DIR)/aps_std_util.o \
+      $(MOD_FEM_OBJ_DIR)/aps_gauss_util_std.o 
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/aps_std_quad_intf.o \
+      $(MOD_FEM_OBJ_DIR)/aps_std_util.o \
+      $(MOD_FEM_OBJ_DIR)/aps_gauss_util_std.o 
+
+# approximation module for standard quadratic discretization 
+$(MOD_FEM_OBJ_DIR)/aps_std_quad_intf.o : \
+	aps_std_quad_intf.c aph_std_quad.h \
+	$(MOD_FEM_INC_DIR)/aph_intf.h  \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h 
+	$(CC) $(CFL) -c aps_std_quad_intf.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/aps_std_util.o : \
+	aps_std_util.c aph_std_quad.h \
+	$(MOD_FEM_INC_DIR)/aph_intf.h \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h 
+	$(CC) $(CFL) -c aps_std_util.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/aps_gauss_util_std.o : \
+	aps_gauss_util_std.c aph_std_quad.h 
+	$(CC) $(CFL) -c aps_gauss_util_std.c -o $@ $(INC)
+
+clean:
+	rm -f *~ *.o *.a

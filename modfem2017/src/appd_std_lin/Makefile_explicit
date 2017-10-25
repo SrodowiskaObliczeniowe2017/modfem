@@ -1,0 +1,13 @@
+# Makefile for parallel approximation module (as overlay for apm_dg_prism)
+
+$(MOD_FEM_OBJ_DIR)/appl_std_lin_lib.a: $(MOD_FEM_OBJ_DIR)/apps_std_lin_intf.o 
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/apps_std_lin_intf.o 
+
+# parallel mesh manipulation module with prismatic elements obj files
+$(MOD_FEM_OBJ_DIR)/apps_std_lin_intf.o : apps_std_lin_intf.c \
+	$(MOD_FEM_INC_DIR)/aph_intf.h apph_std_lin.h 
+	$(CC) $(CFL) -c apps_std_lin_intf.c -o $@ $(INC)
+
+clean:
+	rm -f *~ *.o *.a
+

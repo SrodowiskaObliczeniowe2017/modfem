@@ -1,0 +1,19 @@
+export MOD_FEM_DIR=/home/krzysztof/modular_fem_code/git/modfem2015/
+
+export MOD_FEM_ARCH=centos7_mkl_amd_mpi_opencl_icc_icpc
+export MOD_FEM_BIN=MOD_FEM_conv_diff_prism_std_mpi_ocl
+
+#export MOD_FEM_ARCH=centos7_KB_amd_mpi_opencl_icc_icpc
+#export MOD_FEM_BIN=MOD_FEM_conv_diff_prism_std_mpi_ocl_d
+
+export MPI_BIN=/usr/lib64/openmpi/bin/mpiexec
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+$MPI_BIN -np 4 xterm -sb -sl 10000 -e gdb $MOD_FEM_DIR/bin_cmake/$MOD_FEM_ARCH/$MOD_FEM_BIN -q -x gdb_file
+
+#$MPI_BIN -np 4 $MOD_FEM_DIR/bin_cmake/$MOD_FEM_ARCH/$MOD_FEM_BIN $MOD_FEM_DIR/ctest/conv_diff/Laplace_std_in_box_mpi_opencl 
+
+
+

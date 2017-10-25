@@ -1,0 +1,57 @@
+set terminal X11
+set ylabel "Error"
+set xlabel "Number of degrees of freedom"
+set logscale y
+set logscale x
+set data style linespoints
+set output "l2_ndof_conv_t.eps"
+set title "L2 norm convergence for pure diffusion problem - prismatic elements, tensor product polynomials"
+plot [15:200000][1e-8:0.1]"diff_xyz.h_conv" using 3:4 title "h-convergence", "diff_xyz.p_conv" using 3:4 title "p-convergence"
+set output "h1_ndof_conv_t.eps"
+set title "H1 seminorm convergence for pure diffusion problem - prismatic elements, tensor product polynomials"
+plot [15:200000][1e-7:1] "diff_xyz.h_conv" using 3:5 title "h-convergence", "diff_xyz.p_conv" using 3:5 title "p-convergence"
+
+set output "l2_ndof_conv_c.eps"
+set title "L2 norm convergence for pure diffusion problem - prismatic elements, complete order polynomials"
+plot [15:200000][1e-9:0.1] "diff_xyz_c.h_conv" using 3:4 title "h-convergence", "diff_xyz_c.p_conv" using 3:4 title "p-convergence"
+set output "h1_ndof_conv_c.eps"
+set title "H1 seminorm convergence for pure diffusion problem - prismatic elements, complete order polynomials"
+plot [15:200000][1e-7:1] "diff_xyz_c.h_conv" using 3:5 title "h-convergence","diff_xyz_c.p_conv" using 3:5 title "p-convergence"
+
+set output "l2_ndof_h_conv.eps"
+set title "L2 norm convergence for pure diffusion problem - prismatic elements"
+plot [15:200000][1e-9:0.1]"diff_xyz.h_conv" using 3:4 title "h-convergence for tensor product polynomials", "diff_xyz_c.h_conv" using 3:4 title "h-convergence for complete order polynomials"
+set output "l2_ndof_p_conv.eps"
+set title "L2 norm convergence for pure diffusion problem - prismatic elements"
+plot [15:200000][1e-9:0.1]"diff_xyz.p_conv" using 3:4 title "p-convergence for tensor product polynomials", "diff_xyz_c.p_conv" using 3:4 title "p-convergence for complete order polynomials"
+
+set output "h1_ndof_h_conv.eps"
+set title "H1 seminorm convergence for pure diffusion problem - prismatic elements"
+plot [15:200000][1e-7:1] "diff_xyz.h_conv" using 3:5 title "h-convergence for tensor product polynomials", "diff_xyz_c.h_conv" using 3:5 title "h-convergence for complete order polynomials"
+set output "h1_ndof_p_conv.eps"
+set title "H1 seminorm convergence for pure diffusion problem - prismatic elements"
+plot [15:200000][1e-7:1] "diff_xyz.p_conv" using 3:5 title "p-convergence for tensor product polynomials", "diff_xyz_c.p_conv" using 3:5 title "p-convergence for complete order polynomials"
+
+set xlabel "Degree of polynomial"
+set nologscale x
+set output "l2_p_conv.eps"
+set title "L2 norm convergence for pure diffusion problem - prismatic elements"
+plot [1:9][1e-9:0.1] "diff_xyz.p_conv" using 2:4 title "p-convergence, tensor product polynomials","diff_xyz_c.p_conv" using 2:4 title "p-convergence, complete order polynomials"
+set output "h1_p_conv.eps"
+set title "H1 seminorm convergence for pure diffusion problem - prismatic elements"
+plot [1:9][1e-7:1] "diff_xyz.p_conv" using 2:5 title "p-convergence, tensor product polynomials","diff_xyz_c.p_conv" using 2:5 title "p-convergence, complete order polynomials"
+
+set xlabel "Element size h"
+set logscale x
+set output "l2_h_conv.eps"
+set title "L2 norm convergence for pure diffusion problem - prismatic elements"
+plot [1.5:0.05][1e-9:0.1] "diff_xyz.h_conv" using 1:4 title "h-convergence, tensor product polynomials","diff_xyz_c.h_conv" using 1:4 title "h-convergence, complete order polynomials"
+set output "h1_h_conv.eps"
+set title "H1 seminorm convergence for pure diffusion problem - prismatic elements"
+plot [1.5:0.05][1e-7:1] "diff_xyz.h_conv" using 1:5 title "h-convergence, tensor product polynomials","diff_xyz_c.h_conv" using 1:5 title "h-convergence, complete order polynomials"
+
+, "test_l2" using 1:2 title "reference slope"
+, "test_h1" using 1:2 title "reference slope"
+
+set terminal postscript
+

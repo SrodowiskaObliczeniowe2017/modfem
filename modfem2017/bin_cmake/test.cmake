@@ -1,0 +1,63 @@
+#SET (CTEST_COMMAND "ctest -D Experimental")
+SET (CTEST_SOURCE_DIRECTORY "../../src")
+SET (CTEST_BINARY_DIRECTORY ".")
+
+set (nr "")
+set (wz "")
+set(inr 0)
+set(iwz 0)
+
+
+if(${CTEST_SCRIPT_ARG} MATCHES "")
+  STRING(REGEX REPLACE "," ";" CTEST_SCRIPT_ARG ${CTEST_SCRIPT_ARG})
+  foreach(arg ${CTEST_SCRIPT_ARG})
+    STRING(REGEX MATCHALL "[0-9]+" argl ${arg})
+    if(${argl} MATCHES "")
+		if(inr EQUAL 0)
+			set (nr "-I ${argl},${argl},1")
+			#message("pierwszy "${nr})
+			set(inr 1)
+		else()
+			set (nr "${nr},${argl}")
+			#message("nastepny "${nr})
+		endif()
+	else()
+		if(iwz EQUAL 0)
+			set (wz "-R ${arg}")
+			#message("pierwszy "${wz})
+			set(iwz 1)
+		else()
+			set (wz "${wz}|${arg}")
+			#message("nastepny "${wz})
+		endif()
+	endif()
+  endforeach()
+
+  SET(polecenie "ctest -D Experimental ")
+  if(iwz EQUAL 1)
+     SET(polecenie "${polecenie}${wz} ")
+	 if(inr EQUAL 1)
+        SET(polecenie "${polecenie}-U ${nr}")
+     endif()
+  elseif(inr EQUAL 1)
+     SET(polecenie "${polecenie}${nr}")
+  endif()
+ SET(CTEST_COMMAND ${polecenie})
+ 
+  message(${polecenie})
+	
+else(${CTEST_SCRIPT_ARG} MATCHES "")
+  SET(CTEST_COMMAND "ctest -D Experimental")
+  #message("ELSE")
+endif()
+#message("${CTEST_SCRIPT_ARG}")
+
+
+
+
+#SET(MODEL Nightly)
+#IF(${CTEST_SCRIPT_ARG} MATCHES Experimental)
+#  SET(MODEL Experimental)
+#ENDIF(${CTEST_SCRIPT_ARG} MATCHES Experimental)
+#SET (CTEST_COMMAND
+#    "/usr/local/bin/ctest -D ${MODEL}")

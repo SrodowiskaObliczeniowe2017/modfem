@@ -1,0 +1,32 @@
+# Makefile for sequential approximation field module
+
+# discontinuous Galerkin approximation for prismatic elements 
+$(MOD_FEM_OBJ_DIR)/apl_dg_prism_lib.a: \
+      $(MOD_FEM_OBJ_DIR)/aps_dg_prism_intf.o \
+      $(MOD_FEM_OBJ_DIR)/aps_dg_util.o \
+      $(MOD_FEM_OBJ_DIR)/aps_gauss_util.o 
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/aps_dg_prism_intf.o \
+      $(MOD_FEM_OBJ_DIR)/aps_dg_util.o \
+      $(MOD_FEM_OBJ_DIR)/aps_gauss_util.o 
+
+# approximation module for discontinuous Galerkin discretization using
+# prismatic elements
+$(MOD_FEM_OBJ_DIR)/aps_dg_prism_intf.o : \
+	aps_dg_prism_intf.c aph_dg_prism.h \
+	$(MOD_FEM_INC_DIR)/aph_intf.h  \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h 
+	$(CC) $(CFL) -c aps_dg_prism_intf.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/aps_dg_util.o : \
+	aps_dg_util.c aph_dg_prism.h \
+	$(MOD_FEM_INC_DIR)/aph_intf.h \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h 
+	$(CC) $(CFL) -c aps_dg_util.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/aps_gauss_util.o : \
+	aps_gauss_util.c aph_dg_prism.h 
+	$(CC) $(CFL) -c aps_gauss_util.c -o $@ $(INC)
+
+clean:
+	rm -f *~ *.o *.a
+

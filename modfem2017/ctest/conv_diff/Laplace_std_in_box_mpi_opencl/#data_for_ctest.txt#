@@ -1,0 +1,45 @@
+Data from sequential execution:
+
+Nodes   : allocated 4500000 structures, read 79103 structures for 79092 nodes
+Edges   : allocated 20000000 structures, read 330188 structures for 278336 edges
+Faces   : allocated 24000000 structures, read 357236 structures for 307313 faces
+Elements: allocated 9000000 structures, read 123296 structures for 108068 elements
+
+After reading initial data.
+Parameters (number of active, maximal index):
+Elements: nrel 108068, nmel 123296
+Faces:    nrfa 307313, nmfa 357236
+Edges:    nred 278336, nmed 330188
+Nodes:    nrno 79092, nmno 79103
+
+GMRES: norm of initial residual 164.99952228 (relative to RHS 1.00000000)
+
+After solving a system of linear equations - norm of residuum =    0.000000015441859
+
+Local number of degrees of freedom: 79092
+Local L2 norm of error      =    0.000094906149016
+Local H1 seminorm of error  =    0.010104766780240
+
+
+Tests:
+
+input_interactive:
+output
+s
+q
+
+mkb.dat:
+
+1 1 20    	1-single-level GMRES, 1-number of levels, 20-Krylov vectors)
+x y z  		x-preconditioner  y-internal sweep  z-block type: small
+1000 0 1e-12   	100-max_iter, 1-rel_ini conv type, 1e-12 conv treshold
+2 1 0   	2-output level: every iteration, nr_pre and post_smooth steps   
+
+x y z:
+	2 1 1
+	2 1 4
+	4 1 1
+
+go_gbd:
+
+-np x : x = 1,2,4

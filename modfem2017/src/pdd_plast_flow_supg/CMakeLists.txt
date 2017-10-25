@@ -1,0 +1,116 @@
+# -- Add target to global list --
+list(APPEND MOD_FEM_EXEC_LIST "CREATE_MOD_FEM_PLAST_FLOW_PRISM_STD")
+list(APPEND MOD_FEM_EXEC_LIST "CREATE_MOD_FEM_PLAST_FLOW_HYBRID_STD")
+list(APPEND MOD_FEM_EXEC_LIST "CREATE_MOD_FEM_PLAST_FLOW_REMESH_STD") 
+list(APPEND MOD_FEM_EXEC_LIST "CREATE_MOD_FEM_PLAST_FLOW_PRISM2D_STD")
+set(MOD_FEM_EXEC_LIST "${MOD_FEM_EXEC_LIST}" PARENT_SCOPE)
+
+# -- Exec files --
+set(pdd_plast_flow_srcdir "${CMAKE_SOURCE_DIR}/pdd_plast_flow_supg")
+set(PDD_PLAST_FLOW_PRISM_STD_EXE "MOD_FEM_plast_flow_supg_prism_std")
+set(PDD_PLAST_FLOW_HYBRID_STD_EXE "MOD_FEM_plast_flow_supg_hybrid_std")
+set(PDD_PLAST_FLOW_PRISM2D_STD_EXE "MOD_FEM_plast_flow_supg_prism2d_std")
+set(PDD_PLAST_FLOW_REMESH_STD_EXE "MOD_FEM_plast_flow_supg_remesh_std")
+
+# -- Include directories --
+list(APPEND PDD_PLAST_FLOW_INCLUDE_DIRS
+  ${pdd_plast_flow_srcdir}/adaptation
+  ${pdd_plast_flow_srcdir}/input_output
+  ${pdd_plast_flow_srcdir}/materials
+  ${pdd_plast_flow_srcdir}/linear_solver_interface
+  ${pdd_plast_flow_srcdir}/main
+  ${pdd_plast_flow_srcdir}/include
+  ${pdd_plast_flow_srcdir}/time_integration
+  ${pdd_plast_flow_srcdir}/weak_formulation
+  ${pdd_plast_flow_srcdir}
+)
+if(PDD_PLAST_FLOW_INCLUDE_DIRS)
+  set(PDD_PLAST_FLOW_INCLUDE_DIRS ${PDD_PLAST_FLOW_INCLUDE_DIRS} PARENT_SCOPE)
+endif()
+# -- Source files list --
+collect_src_from_include_dirs(PDD_PLAST_FLOW_INCLUDE_DIRS)
+
+# -- Target --
+include_directories(${PDD_PLAST_FLOW_INCLUDE_DIRS} ${PDD_PLAST_FLOW_EXTERNAL_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/include)
+
+if(CREATE_MOD_FEM_PLAST_FLOW_PRISM_STD)
+  if(NOT ${MODFEM_ACCEL} STREQUAL "opencl")
+    add_executable(${PDD_PLAST_FLOW_PRISM_STD_EXE} ${SOURCE_FILES})
+    #target_link_libraries(${PDD_PLAST_FLOW_PRISM_STD_EXE} ${PDD_PLAST_FLOW_EXTERNAL_LIBRARIES} mml_prism apl_std_lin utl_system utl_util tml_omp ${MODFEM_DIRECT_SOLVER_MODULE} ${MODFEM_ITER_SOLVER_MODULE} ${MODFEM_MPI_LIBS_STD})
+    target_link_libraries(${PDD_PLAST_FLOW_PRISM_STD_EXE} ${PDD_PLAST_FLOW_EXTERNAL_LIBRARIES} mml_prism apl_std_lin utl_system utl_util ${MODFEM_DIRECT_SOLVER_MODULE} ${MODFEM_ITER_SOLVER_MODULE} ${MODFEM_MPI_LIBS_STD})
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_PRISM_STD_EXE} PROPERTIES COMPILE_DEFINITIONS ${MODFEM_MPI_CODE_DEFINE} RELEASE_POSTFIX "${RELEASE_POSTFIX}" DEBUG_POSTFIX "${DEBUG_POSTFIX}")
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_PRISM_STD_EXE} PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS}")
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_PRISM_STD_EXE} PROPERTIES LINK_FLAGS "${LINK_FLAGS}")
+  else()
+    message(WARNING "OpenCL for PDD_PLAST_FLOW_PRISM_STD not implemented yet!!!")
+  endif()
+endif()
+
+if(CREATE_MOD_FEM_PLAST_FLOW_HYBRID_STD)
+  if(NOT ${MODFEM_ACCEL} STREQUAL "opencl")
+    add_executable(${PDD_PLAST_FLOW_HYBRID_STD_EXE} ${SOURCE_FILES})
+    target_link_libraries(${PDD_PLAST_FLOW_HYBRID_STD_EXE} ${PDD_PLAST_FLOW_EXTERNAL_LIBRARIES} mml_t4_prism apl_std_lin utl_system utl_util ${MODFEM_DIRECT_SOLVER_MODULE} ${MODFEM_ITER_SOLVER_MODULE} ${MODFEM_MPI_LIBS_STD} )
+    target_link_libraries(${PDD_PLAST_FLOW_HYBRID_STD_EXE} ${MODFEM_USER_LIBS})
+    target_link_libraries(${PDD_PLAST_FLOW_HYBRID_STD_EXE} ${MODFEM_USER_LIBS})
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_HYBRID_STD_EXE} PROPERTIES COMPILE_DEFINITIONS ${MODFEM_MPI_CODE_DEFINE} RELEASE_POSTFIX "${RELEASE_POSTFIX}" DEBUG_POSTFIX "${DEBUG_POSTFIX}")
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_HYBRID_STD_EXE} PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS}")  
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_HYBRID_STD_EXE} PROPERTIES LINK_FLAGS "${LINK_FLAGS}" )
+    #message("${PDD_PLAST_FLOW_HYBRID_STD_EXE} LINK_FLAGS ARE: ${LINK_FLAGS}")
+    #message("${PDD_PLAST_FLOW_HYBRID_STD_EXE} COMPILE_DEFINITIONS ARE: ${MODFEM_MPI_CODE_DEFINE}")
+    #message("${PDD_PLAST_FLOW_HYBRID_STD_EXE} COMPILE_FLAGS ARE: ${COMPILE_FLAGS}")
+  else()
+    message(WARNING "OpenCL for PDD_PLAST_FLOW_HYBRID_STD not implemented yet!!!")
+  endif()
+endif()
+
+if(CREATE_MOD_FEM_PLAST_FLOW_REMESH_STD)
+  if(NOT ${MODFEM_ACCEL} STREQUAL "opencl")
+    add_executable(${PDD_PLAST_FLOW_REMESH_STD_EXE} ${SOURCE_FILES})
+    target_link_libraries(${PDD_PLAST_FLOW_REMESH_STD_EXE} ${PDD_PLAST_FLOW_EXTERNAL_LIBRARIES} mml_remesh apl_std_lin utl_system utl_util ${MODFEM_DIRECT_SOLVER_MODULE} ${MODFEM_ITER_SOLVER_MODULE} ${MODFEM_MPI_LIBS_STD})
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_REMESH_STD_EXE} PROPERTIES COMPILE_DEFINITIONS ${MODFEM_MPI_CODE_DEFINE} RELEASE_POSTFIX "${RELEASE_POSTFIX}" DEBUG_POSTFIX "${DEBUG_POSTFIX}")
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_REMESH_STD_EXE} PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS}")
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_REMESH_STD_EXE} PROPERTIES LINK_FLAGS "${LINK_FLAGS}")
+  else()
+    message(WARNING "OpenCL for PDD_PLAST_FLOW_REMESH_STD not implemented yet!!!")
+  endif()
+endif()
+
+
+if(CREATE_MOD_FEM_PLAST_FLOW_PRISM2D_STD)
+  if(NOT ${MODFEM_ACCEL} STREQUAL "opencl")
+    add_executable(${PDD_PLAST_FLOW_PRISM2D_STD_EXE} ${SOURCE_FILES})
+    target_link_libraries(${PDD_PLAST_FLOW_PRISM2D_STD_EXE} ${PDD_PLAST_FLOW_EXTERNAL_LIBRARIES} mml_prism_2D apl_std_lin utl_system utl_util ${MODFEM_DIRECT_SOLVER_MODULE} ${MODFEM_ITER_SOLVER_MODULE} ${MODFEM_MPI_LIBS_STD})
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_PRISM2D_STD_EXE} PROPERTIES COMPILE_DEFINITIONS ${MODFEM_MPI_CODE_DEFINE} RELEASE_POSTFIX "${RELEASE_POSTFIX}" DEBUG_POSTFIX "${DEBUG_POSTFIX}")
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_PRISM2D_STD_EXE} PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS}")
+    SET_TARGET_PROPERTIES(${PDD_PLAST_FLOW_PRISM2D_STD_EXE} PROPERTIES LINK_FLAGS "${LINK_FLAGS}")
+  else()
+    message(WARNING "OpenCL for PDD_PLAST_FLOW_PRISM2D_STD not implemented yet!!!")
+  endif()
+endif()
+
+
+##############################################################################################################
+enable_testing ()
+
+foreach(folder ${MKL_INCLUDE_DIRS})
+    set(KKK "${KKK}${folder}:")
+endforeach()
+
+foreach(folder ${MKL_LIBRARY_DIRS})
+    set(KKK "${KKK}${folder}:")
+endforeach()
+
+set(KKK "${KKK}.")
+
+
+
+set(CTEST_BUILD_DIR $ENV{PWD})
+set(CTEST_DIR ${CMAKE_SOURCE_DIR}/../ctest)
+
+
+add_test (plast_flow_Make ${CTEST_DIR}/build.sh ${CTEST_BUILD_DIR}/pdd_plast_flow_supg/ ${ENV_PLATFORM} ${KKK})
+
+set (passRegex "^Test passed")
+set (failRegex "Fail")
+
+

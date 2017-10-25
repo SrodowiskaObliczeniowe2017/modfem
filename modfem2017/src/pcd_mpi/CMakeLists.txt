@@ -1,0 +1,1 @@
+add_library(pcl_mpi pcs_mpi_intf.c ../include/pch_intf.h)

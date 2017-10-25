@@ -1,0 +1,101 @@
+#!/bin/bash
+
+# This script can auto-position multiple xterm windows used 
+# for debugging MPI programs.
+# 
+# put it into /usr/bin and use 'mpixterm' instead of normal 'xterm'
+# eg.: mpirun -np 2 mpixterm -hold -e gdb --args MyMpiProgram arg1 arg2
+#
+
+### Creating lock
+LOCKDIR="/tmp/mpixterm-lock"
+PIDFILE="$LOCKDIR/$BASHPID"
+
+if [ ! -d $LOCKDIR ]; then
+	$(mkdir -p $LOCKDIR)	
+fi
+
+touch $PIDFILE
+
+function finish {
+  rm $PIDFILE;
+}
+trap finish EXIT
+
+### Screen parameters
+screen_rows=56
+screen_cols=220
+screen_pix_w=1900
+screen_pix_h=1060
+
+## xterm size determining
+max_xterms=$1
+half_xterms=$(( $1/2 ))
+#echo $max_xterms
+#echo $half_xterms
+cols=$(( $screen_cols / $max_xterms ))
+rows=$screen_rows
+x=0
+y=0
+dx=$(( $screen_pix_w / $max_xterms ))
+
+if [ $max_xterms -ge 4 ]; then
+	rows=$(( $rows / 2 ))
+	cols=$(( 2 * $cols ))
+	dx=$(( $dx * 2 ))	
+fi
+
+if [ $cols -gt 80 ]; then
+	cols=80
+fi
+
+#echo $cols
+#echo $rows
+
+### Waiting for all processes to follow
+files=( $LOCKDIR/* )
+while [ ${#files[@]} -lt $max_xterms ] 
+do
+	sleep  0.01s
+	files=( $LOCKDIR/* )
+	#echo ${files[*]}
+done
+
+pids=( $(
+    for pid in ${files[@]}
+    do
+	pid=${pid##*/}
+        echo "$pid"
+    done | sort) )
+
+echo ${pids[*]}
+
+### Determinig which process and which position to take
+nr_xterms=0
+until [ $BASHPID -eq $(( ${pids[$nr_xterms]} )) ]
+do
+	nr_xterms=$(( $nr_xterms+1 ))
+done
+
+#echo "$BASHPID found self as $nr_xterms"
+
+#nr_xterms=$(( $max_xterms - ($MPIEXTERM_PID - $BASHPID) ))
+#nr_xterms=$(pgrep -c -x xterm)
+#nr_xterms=$(( $BASHPID % $max_xterms ))
+xterm_nr=$(( $nr_xterms + 1 ))
+
+x=$(( $nr_xterms * $dx ))
+
+if [ $nr_xterms -ge $half_xterms -a $max_xterms -ge 4 ]; then
+	y=$(( ($screen_pix_h / 2) + 30))
+	x=$(( ($nr_xterms % $half_xterms) * $dx ))
+fi
+
+#echo $x
+#echo $y
+#echo $dx
+# Lunching xterm and cleaning lock files.
+
+
+xterm -geometry "$cols"x"$rows"+"$x"+"$y" "${@:2}";bash
+

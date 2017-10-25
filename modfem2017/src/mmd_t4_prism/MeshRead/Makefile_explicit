@@ -1,0 +1,51 @@
+# Makefile for hybrid mesh module - MeshRead part
+
+$(MOD_FEM_OBJ_DIR)/libMeshRead.a : \
+		$(MOD_FEM_OBJ_DIR)/AdinaDatImporter.o \
+		$(MOD_FEM_OBJ_DIR)/BinaryFileReader.o \
+		$(MOD_FEM_OBJ_DIR)/DmpFileImporter.o \
+		$(MOD_FEM_OBJ_DIR)/IMeshReader.o \
+		$(MOD_FEM_OBJ_DIR)/InFileImporter.o \
+		$(MOD_FEM_OBJ_DIR)/KazFileImporter.o \
+		$(MOD_FEM_OBJ_DIR)/MeshFileImporter.o \
+		$(MOD_FEM_OBJ_DIR)/NasFileImporter.o \
+		$(MOD_FEM_OBJ_DIR)/SimplePointReader.o
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/AdinaDatImporter.o \
+		$(MOD_FEM_OBJ_DIR)/BinaryFileReader.o \
+		$(MOD_FEM_OBJ_DIR)/DmpFileImporter.o \
+		$(MOD_FEM_OBJ_DIR)/IMeshReader.o \
+		$(MOD_FEM_OBJ_DIR)/InFileImporter.o \
+		$(MOD_FEM_OBJ_DIR)/KazFileImporter.o \
+		$(MOD_FEM_OBJ_DIR)/MeshFileImporter.o \
+		$(MOD_FEM_OBJ_DIR)/NasFileImporter.o \
+		$(MOD_FEM_OBJ_DIR)/SimplePointReader.o
+
+$(MOD_FEM_OBJ_DIR)/AdinaDatImporter.o : AdinaDatImporter.cpp AdinaDatImporter.h
+	$(CPPC) $(CFL) -c AdinaDatImporter.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/BinaryFileReader.o : BinaryFileReader.cpp BinaryFileReader.h
+	$(CPPC) $(CFL) -c BinaryFileReader.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/DmpFileImporter.o : DmpFileImporter.cpp DmpFileImporter.h
+	$(CPPC) $(CFL) -c DmpFileImporter.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/IMeshReader.o : IMeshReader.cpp IMeshReader.h
+	$(CPPC) $(CFL) -c IMeshReader.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/InFileImporter.o : InFileImporter.cpp InFileImporter.h
+	$(CPPC) $(CFL) -c InFileImporter.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/KazFileImporter.o : KazFileImporter.cpp KazFileImporter.h
+	$(CPPC) $(CFL) -c KazFileImporter.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/MeshFileImporter.o : MeshFileImporter.cpp MeshFileImporter.h
+	$(CPPC) $(CFL) -c MeshFileImporter.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/NasFileImporter.o : NasFileImporter.cpp NasFileImporter.h
+	$(CPPC) $(CFL) -c NasFileImporter.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/SimplePointReader.o : SimplePointReader.cpp SimplePointReader.h
+	$(CPPC) $(CFL) -c SimplePointReader.cpp -o $@ $(INC)
+
+clean:
+	rm -f *.o *.a *~

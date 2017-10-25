@@ -1,0 +1,31 @@
+# Makefile for hybrid mesh module - MeshWrite part
+
+$(MOD_FEM_OBJ_DIR)/libMeshWrite.a : \
+		$(MOD_FEM_OBJ_DIR)/BinaryFileWriter.o \
+		$(MOD_FEM_OBJ_DIR)/DmpFileExporter.o \
+		$(MOD_FEM_OBJ_DIR)/KazFileExporter.o \
+		$(MOD_FEM_OBJ_DIR)/MeshFileWriter.o \
+		$(MOD_FEM_OBJ_DIR)/MileninExporter.o
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/BinaryFileWriter.o \
+		$(MOD_FEM_OBJ_DIR)/DmpFileExporter.o \
+		$(MOD_FEM_OBJ_DIR)/KazFileExporter.o \
+		$(MOD_FEM_OBJ_DIR)/MeshFileWriter.o \
+		$(MOD_FEM_OBJ_DIR)/MileninExporter.o 
+		
+$(MOD_FEM_OBJ_DIR)/BinaryFileWriter.o : BinaryFileWriter.cpp BinaryFileWriter.h
+	$(CPPC) $(CFL) -c BinaryFileWriter.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/DmpFileExporter.o : DmpFileExporter.cpp DmpFileExporter.h
+	$(CPPC) $(CFL) -c DmpFileExporter.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/KazFileExporter.o : KazFileExporter.cpp KazFileExporter.h
+	$(CPPC) $(CFL) -c KazFileExporter.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/MeshFileWriter.o : MeshFileWriter.cpp MeshFileWriter.h
+	$(CPPC) $(CFL) -c MeshFileWriter.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/MileninExporter.o : MileninExporter.cpp MileninExporter.h
+	$(CPPC) $(CFL) -c MileninExporter.cpp -o $@ $(INC)
+
+clean:
+	rm -f *.o *.a *~

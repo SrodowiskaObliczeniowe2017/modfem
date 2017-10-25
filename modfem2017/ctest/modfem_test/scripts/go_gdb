@@ -1,0 +1,5 @@
+export MOD_FEM_DIR=/home/krzysztof/modular_fem_code/svn/modular_fem_code_2009/
+
+
+/usr/lib64/openmpi/bin/mpiexec -np 3 /usr/bin/xterm -sb -sl 10000 -e gdb $MOD_FEM_DIR/bin_cmake/centos7_mkl_mpi_opencl_mpicc_mpicxx/MOD_FEM_conv_diff_prism_std_mpi_ocl -q -x gdb_file
+

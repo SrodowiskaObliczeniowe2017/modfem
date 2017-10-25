@@ -1,0 +1,99 @@
+# Makefile for the adapter of the multi-level Krylow space solver
+
+$(MOD_FEM_OBJ_DIR)/lsl_mkb_lib.a: \
+	  $(MOD_FEM_OBJ_DIR)/lsl_mkb_direct_lib.a \
+	  $(MOD_FEM_OBJ_DIR)/lal_block_lib.a \
+	  $(MOD_FEM_OBJ_DIR)/lal_crs_lib.a \
+	  $(MOD_FEM_OBJ_DIR)/lal_crs_generic_lib.a \
+	  $(MOD_FEM_OBJ_DIR)/lal_bcrs_lib.a \
+	  lsh_mkb_intf.h $(MOD_FEM_OBJ_DIR)/lss_mkb_intf.o \
+	  $(MOD_FEM_OBJ_DIR)/lss_mkb_fem_intf.o \
+	  $(MOD_FEM_OBJ_DIR)/lss_mkb_core.o \
+	  $(MOD_FEM_OBJ_DIR)/las_intf.o \
+	  lsd_mkb_core/lsh_mkb_core_fem_intf.h \
+	  lsd_mkb_core/lsh_mkb_core.h
+	$(AR) $@  $(MOD_FEM_OBJ_DIR)/lss_mkb_intf.o \
+          $(MOD_FEM_OBJ_DIR)/lss_mkb_fem_intf.o \
+	  $(MOD_FEM_OBJ_DIR)/lss_mkb_core.o \
+	  $(MOD_FEM_OBJ_DIR)/las_intf.o
+
+# PARDISO version (SuperLU to be done)
+$(MOD_FEM_OBJ_DIR)/lsl_mkb_direct_lib.a: $(MOD_FEM_OBJ_DIR)/lss_mkb_pardiso.o \
+	  lsd_mkb_pardiso/lsh_mkb_pardiso.h
+	$(AR) $@  $(MOD_FEM_OBJ_DIR)/lss_mkb_pardiso.o 
+
+$(MOD_FEM_OBJ_DIR)/lal_block_lib.a: \
+	  $(MOD_FEM_OBJ_DIR)/las_block_intf.o \
+	  $(MOD_FEM_OBJ_DIR)/las_block_util.o \
+          lah_intf.h \
+	  lad_block/lah_block.h
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/las_block_intf.o \
+	  $(MOD_FEM_OBJ_DIR)/las_block_util.o 
+
+$(MOD_FEM_OBJ_DIR)/lal_crs_lib.a: \
+	  $(MOD_FEM_OBJ_DIR)/las_crs_intf.o \
+	  lah_intf.h \
+	  lad_crs/lah_crs.h
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/las_crs_intf.o
+
+$(MOD_FEM_OBJ_DIR)/lal_crs_generic_lib.a: \
+	  $(MOD_FEM_OBJ_DIR)/las_crs_generic_intf.o \
+	  lah_intf.h \
+	  lad_crs_generic/lah_crs_generic.h
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/las_crs_generic_intf.o
+
+$(MOD_FEM_OBJ_DIR)/lal_bcrs_lib.a: \
+	  $(MOD_FEM_OBJ_DIR)/las_bcrs_intf.o \
+	  lah_intf.h \
+	  lad_bcrs/lah_bcrs.h
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/las_bcrs_intf.o 
+
+
+$(MOD_FEM_OBJ_DIR)/lss_mkb_intf.o: lss_mkb_intf.c lsh_mkb_intf.h \
+	  lsd_mkb_core/lsh_mkb_core.h
+	$(CC) $(CFL) -c lss_mkb_intf.c -o $@ $(INC)
+
+# PARDISO version (SuperLU to be done)
+$(MOD_FEM_OBJ_DIR)/lss_mkb_pardiso.o: \
+	  lsd_mkb_pardiso/lsh_mkb_pardiso.h \
+	  lsd_mkb_pardiso/lss_mkb_pardiso.c
+	$(CC) $(CFL) -c lsd_mkb_pardiso/lss_mkb_pardiso.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/las_intf.o: las_intf.c lah_intf.h \
+	  lad_block/lah_block.h \
+	  lad_crs/lah_crs.h \
+	  lad_crs_generic/lah_crs_generic.h \
+	  lad_bcrs/lah_bcrs.h
+	$(CC) $(CFL) -c las_intf.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/lss_mkb_fem_intf.o: lss_mkb_fem_intf.c  lsh_mkb_intf.h  \
+	  lsd_mkb_core/lsh_mkb_core_fem_intf.h \
+	  lsd_mkb_core/lsh_mkb_core.h
+	$(CC) $(CFL) -c lss_mkb_fem_intf.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/lss_mkb_core.o : lsd_mkb_core/lss_mkb_core.c \
+	  lsd_mkb_core/lsh_mkb_core.h
+	$(CC) $(CFL) -c lsd_mkb_core/lss_mkb_core.c  -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/las_block_intf.o : lad_block/las_block_intf.c\
+        lah_intf.h lad_block/lah_block.h 
+	$(CC) $(CFL) -c lad_block/las_block_intf.c  -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/las_block_util.o : lad_block/las_block_util.c lah_intf.h lad_block/lah_block.h 
+	$(CC) $(CFL) -c lad_block/las_block_util.c  -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/las_crs_intf.o : lad_crs/las_crs_intf.c\
+        lah_intf.h lad_crs/lah_crs.h 
+	$(CC) $(CFL) -c lad_crs/las_crs_intf.c  -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/las_crs_generic_intf.o : lad_crs_generic/las_crs_generic_intf.c\
+        lah_intf.h lad_crs_generic/lah_crs_generic.h 
+	$(CC) $(CFL) -c lad_crs_generic/las_crs_generic_intf.c  -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/las_bcrs_intf.o : lad_bcrs/las_bcrs_intf.c\
+        lah_intf.h lad_bcrs/lah_bcrs.h 
+	$(CC) $(CFL) -c lad_bcrs/las_bcrs_intf.c  -o $@ $(INC)
+
+clean:
+	rm -f *~ *.o *.a
+

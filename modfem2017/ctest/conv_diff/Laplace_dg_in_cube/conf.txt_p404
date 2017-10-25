@@ -1,0 +1,40 @@
+# Comment lines start with '#'
+
+# Relative path to the fild.dmp file
+./field.dmp
+
+# Relative path to the comparison fild.dmp file
+./comparison/field.dmp
+
+# Relative path to the ctest directory
+/../..
+
+# precision
+5
+
+# jump (1 -no jump)
+1
+
+# limit
+1e-6
+
+# H1 error (0 -no test)
+0.00000194
+
+# L2 error (0 -no test)
+0.0000000473
+
+# ZZ error (0 -no test)
+0
+
+# problem dat
+problem_conv_diff.dat_p404
+
+# solver dat
+mkb.dat_p5
+
+# input_interactive dat
+input_interactive.txt_run_p
+
+# bin name
+#MOD_FEM_conv_diff_prism_dg

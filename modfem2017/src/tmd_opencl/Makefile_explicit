@@ -1,0 +1,21 @@
+# Makefile for OpenCL multithreading initialization routines
+
+$(MOD_FEM_OBJ_DIR)/tml_opencl_lib.a: \
+	$(MOD_FEM_OBJ_DIR)/tms_ocl_intf.o \
+	$(MOD_FEM_OBJ_DIR)/tms_ocl_num_int.o 
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/tms_ocl_intf.o $(MOD_FEM_OBJ_DIR)/tms_ocl_num_int.o
+
+
+$(MOD_FEM_OBJ_DIR)/tms_ocl_intf.o: tms_ocl_intf.c \
+	$(MOD_FEM_INC_DIR)/tmh_intf.h tmh_ocl.h
+	$(CC) $(CFL) -c tms_ocl_intf.c -o $@ $(INC) 
+
+$(MOD_FEM_OBJ_DIR)/tms_ocl_num_int.o: tms_ocl_num_int.c \
+	$(MOD_FEM_INC_DIR)/tmh_intf.h tmh_ocl.h
+	$(CC) $(CFL) -c tms_ocl_num_int.c -o $@ $(INC) 
+
+
+clean:
+	rm -f *~ *.o *.a
+
+ 

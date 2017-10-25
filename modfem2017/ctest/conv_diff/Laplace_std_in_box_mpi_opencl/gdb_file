@@ -1,0 +1,2 @@
+
+run $MOD_FEM_DIR/ctest/conv_diff/Laplace_std_in_box_mpi_opencl

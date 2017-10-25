@@ -1,0 +1,159 @@
+# Makefile for problem dependent module for convection-diffusion eqns and STD
+
+$(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a : \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_main.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_util.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_util_std.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_time.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_ls_intf.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_adapt.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform_std.o 
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_paraview_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_materials.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_bc.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_problem_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_materials_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_bc_io.o 
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/pds_conv_diff_main.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_util.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_util_std.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_time.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_ls_intf.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_adapt.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform_std.o 
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_paraview_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_materials.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_bc.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_problem_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_materials_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_bc_io.o 
+
+# Makefile for problem dependent module for convection-diffusion eqns and STD
+# with OpenCL support 
+$(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_opencl_lib.a : \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_ls_intf_std_opencl.o
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/pds_conv_diff_ls_intf_std_opencl.o 
+
+# Makefile for problem dependent module for convection-diffusion eqns and STD
+
+$(MOD_FEM_OBJ_DIR)/pdl_conv_diff_dg_lib.a : \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_main.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_util.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_util_dg.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_time.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_ls_intf.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_adapt.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform_dg.o 
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_paraview_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_materials.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_bc.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_problem_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_materials_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_bc_io.o 
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/pds_conv_diff_main.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_util.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_util_dg.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_time.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_ls_intf.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_adapt.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform.o \
+           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform_dg.o
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_paraview_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_materials.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_bc.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_problem_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_materials_io.o \
+#           $(MOD_FEM_OBJ_DIR)/pds_conv_diff_bc_io.o 
+
+
+# problem dependent obj files for conv_diff equations
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_main.o : main/pds_conv_diff_main.c 
+	$(CC) $(CFL) -c main/pds_conv_diff_main.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_util.o : main/pds_conv_diff_util.c 
+	$(CC) $(CFL) -c main/pds_conv_diff_util.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_util_dg.o : main/util_dg/pds_conv_diff_util_dg.c 
+	$(CC) $(CFL) -c main/util_dg/pds_conv_diff_util_dg.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_util_std.o : main/util_std/pds_conv_diff_util_std.c 
+	$(CC) $(CFL) -c main/util_std/pds_conv_diff_util_std.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_time.o : \
+	time_integration/pds_conv_diff_time.c 
+	$(CC) $(CFL) -c time_integration/pds_conv_diff_time.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_ls_intf.o : \
+	linear_solver_interface/pds_conv_diff_ls_intf.c 
+	$(CC) $(CFL) -c linear_solver_interface/pds_conv_diff_ls_intf.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_ls_intf_std_opencl.o : \
+	linear_solver_interface/opencl/std_lin/pds_conv_diff_ls_intf_opencl.c 
+	$(CC) $(CFL) -c linear_solver_interface/opencl/std_lin/pds_conv_diff_ls_intf_opencl.c \
+	 -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_adapt.o : \
+	adaptation/pds_conv_diff_adapt.c 
+	$(CC) $(CFL) -c adaptation/pds_conv_diff_adapt.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_io.o : \
+	input_output/pds_conv_diff_io.c 
+	$(CC) $(CFL) -c input_output/pds_conv_diff_io.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_paraview_io.o : \
+	input_output/pds_conv_diff_paraview_io.c 
+	$(CC) $(CFL) -c input_output/pds_conv_diff_paraview_io.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform.o : \
+	../pdd_conv_diff/weak_formulation/pds_conv_diff_weakform.c 
+	$(CC) $(CFL) -c ../pdd_conv_diff/weak_formulation/pds_conv_diff_weakform.c \
+	-o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform_dg.o : \
+	../pdd_conv_diff/weak_formulation/approx_dg/pds_conv_diff_weakform_dg.c 
+	$(CC) $(CFL) -c ../pdd_conv_diff/weak_formulation/approx_dg/pds_conv_diff_weakform_dg.c \
+	-o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_weakform_std.o : \
+	../pdd_conv_diff/weak_formulation/approx_std/pds_conv_diff_weakform_std.c 
+	$(CC) $(CFL) -c ../pdd_conv_diff/weak_formulation/approx_std/pds_conv_diff_weakform_std.c \
+	-o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_problem_io.o : \
+	../pdd_conv_diff/input_output/pds_conv_diff_problem_io.c 
+	$(CC) $(CFL) -c ../pdd_conv_diff/input_output/pds_conv_diff_problem_io.c \
+	-o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_materials.o : \
+	../pdd_conv_diff/weak_formulation/pds_conv_diff_materials.c 
+	$(CC) $(CFL) -c ../pdd_conv_diff/weak_formulation/pds_conv_diff_materials.c \
+	-o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_materials_io.o : \
+	../pdd_conv_diff/input_output/pds_conv_diff_materials_io.c 
+	$(CC) $(CFL) -c ../pdd_conv_diff/input_output/pds_conv_diff_materials_io.c \
+	-o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_bc.o : \
+	../pdd_conv_diff/weak_formulation/pds_conv_diff_bc.c 
+	$(CC) $(CFL) -c ../pdd_conv_diff/weak_formulation/pds_conv_diff_bc.c \
+	-o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/pds_conv_diff_bc_io.o : \
+	../pdd_conv_diff/input_output/pds_conv_diff_bc_io.c 
+	$(CC) $(CFL) -c ../pdd_conv_diff/input_output/pds_conv_diff_bc_io.c \
+	-o $@ $(INC)
+
+clean:
+	rm -f *~ */*~ *.o */*.o *.a */*.a

@@ -1,0 +1,28 @@
+// Microsoft Visual C++ generated resource script.
+//
+#include "resource.h"
+
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+AAAAAAAA                ICON                    "res/mondrian.ico"
+MONDRIAN                ICON                    "res/mondrian.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+FAXIS                   BITMAP                  "res/faxis.bmp"
+XAXIS                   BITMAP                  "res/xaxis.bmp"
+YAXIS                   BITMAP                  "res/yaxis.bmp"
+ZAXIS                   BITMAP                  "res/zaxis.bmp"
+
+
+#define wxUSE_MANIFEST 0

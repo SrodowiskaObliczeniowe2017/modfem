@@ -1,0 +1,16 @@
+centos7_debug_mpi_none_mpicc_mpicxx/
+centos7_debug_mpi_openmp_mpicc_mpicxx/
+centos7_debug_nompi_openmp_icc_icpc/
+centos7_hybrid_debug_mpi_none_mpicc_mpic++/
+centos7_hybrid_debug_mpi_openmp_mpicc_mpic++/
+centos7_hybrid_debug_nompi_openmp_icc_icpc/
+centos7_hybrid_release_mpi_none_mpicc_mpic++/
+centos7_hybrid_release_mpi_openmp_mpicc_mpic++/
+centos7_hybrid_release_nompi_openmp_icc_icpc/
+centos7_release_mpi_openmp_mpicc_mpicxx/
+centos7_release_nompi_none_icc_icpc/
+centos7_release_nompi_openmp_icc_icpc/
+centos7_remesh_nompi_openmp_icc_icpc/
+
+centos7_nv_release_nompi_openmp_icc_icpc/
+centos7_amd_release_nompi_openmp_icc_icpc/

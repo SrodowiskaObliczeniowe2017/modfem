@@ -1,0 +1,51 @@
+# Makefile for sequential mesh manipulation module
+
+
+# sequential mesh manipulation library for prismatic elements
+$(MOD_FEM_OBJ_DIR)/mml_prism_lib.a: $(MOD_FEM_OBJ_DIR)/mms_prism_intf.o \
+      $(MOD_FEM_OBJ_DIR)/mms_prism_datstr.o \
+      $(MOD_FEM_OBJ_DIR)/mms_prism_io_dump.o \
+      $(MOD_FEM_OBJ_DIR)/mms_prism_input_gradmesh.o \
+      $(MOD_FEM_OBJ_DIR)/mms_prism_ref.o \
+      $(MOD_FEM_OBJ_DIR)/mms_prism_util.o \
+      $(MOD_FEM_OBJ_DIR)/mms_util.o 
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/mms_prism_intf.o \
+	$(MOD_FEM_OBJ_DIR)/mms_prism_datstr.o \
+	$(MOD_FEM_OBJ_DIR)/mms_prism_io_dump.o  \
+	$(MOD_FEM_OBJ_DIR)/mms_prism_input_gradmesh.o  \
+	$(MOD_FEM_OBJ_DIR)/mms_prism_ref.o  \
+	$(MOD_FEM_OBJ_DIR)/mms_prism_util.o  \
+	$(MOD_FEM_OBJ_DIR)/mms_util.o
+
+# mesh manipulation module with prismatic elements obj files
+$(MOD_FEM_OBJ_DIR)/mms_prism_intf.o : mms_prism_intf.c \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h mmh_prism.h 
+	$(CC) $(CFL) -c mms_prism_intf.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/mms_prism_datstr.o : mms_prism_datstr.c \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h mmh_prism.h 
+	$(CC) $(CFL) -c mms_prism_datstr.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/mms_prism_io_dump.o : mms_prism_io_dump.c \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h mmh_prism.h 
+	$(CC) $(CFL) -c mms_prism_io_dump.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/mms_prism_input_gradmesh.o : mms_prism_input_gradmesh.c \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h mmh_prism.h 
+	$(CC) $(CFL) -c mms_prism_input_gradmesh.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/mms_prism_ref.o : mms_prism_ref.c \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h mmh_prism.h 
+	$(CC) $(CFL) -c mms_prism_ref.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/mms_prism_util.o : mms_prism_util.c \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h mmh_prism.h 
+	$(CC) $(CFL) -c mms_prism_util.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/mms_util.o : mms_util.c \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h mmh_prism.h 
+	$(CC) $(CFL) -c mms_util.c -o $@ $(INC)
+
+clean:
+	rm -f *~ *.o *.a
+

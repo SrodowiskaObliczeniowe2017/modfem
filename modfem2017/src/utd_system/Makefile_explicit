@@ -1,0 +1,15 @@
+# Makefile for system dependent routines - time measurement etc.
+
+$(MOD_FEM_OBJ_DIR)/utl_time_lib.a: \
+	$(MOD_FEM_OBJ_DIR)/uts_time.o
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/uts_time.o
+
+
+$(MOD_FEM_OBJ_DIR)/uts_time.o: UNIX/uts_time.c \
+	$(MOD_FEM_INC_DIR)/uth_intf.h 
+	$(CC) $(CFL) -c UNIX/uts_time.c -o $@ $(INC)
+
+clean:
+	rm -f *~ *.o *.a
+
+ 

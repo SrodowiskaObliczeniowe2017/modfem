@@ -1,0 +1,24 @@
+# Makefile for parallel mesh manipulation module (as overlay for mmm_prism)
+
+$(MOD_FEM_OBJ_DIR)/mmpl_prism_lib.a: \
+	$(MOD_FEM_OBJ_DIR)/libddm.a \
+	$(MOD_FEM_OBJ_DIR)/mmps_prism_intf.o 
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/mmps_prism_intf.o 
+
+$(MOD_FEM_OBJ_DIR)/libddm.a: \
+	  ddd_manager/ddh_front.h  \
+	  ddd_manager/ddh_manager.h  \
+	  ddd_manager/dds_2el_overlap_hpfem.c  \
+	  ddd_manager/dds_front_subd.c  \
+	  ddd_manager/dds_load_balance.c  \
+	  ddd_manager/dds_manager_intf.c  
+	cd ddd_manager;	$(MAKE) -f Makefile_explicit
+
+# parallel mesh manipulation module with prismatic elements obj files
+$(MOD_FEM_OBJ_DIR)/mmps_prism_intf.o : mmps_prism_intf.c \
+	$(MOD_FEM_INC_DIR)/mmh_intf.h mmph_prism.h 
+	$(CC) $(CFL) -c mmps_prism_intf.c -o $@ $(INC)
+
+clean:
+	rm -f *~ *.o *.a
+

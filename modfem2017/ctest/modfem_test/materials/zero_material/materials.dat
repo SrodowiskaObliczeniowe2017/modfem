@@ -1,0 +1,11 @@
+group_to_materials_assignment: (
+{
+material_number = 1;
+groups = 1;
+});
+
+group_to_blocks_assignment: (
+{
+block_number = 1;
+groups = 1;
+});

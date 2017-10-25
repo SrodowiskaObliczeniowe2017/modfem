@@ -1,0 +1,57 @@
+NUMBER_OF_PROBLEMS
+1		1 - single problem
+PROBLEM_TYPE
+DIFF_IN_CUBE
+MESH_TYPE
+p               prismatic mesh in standard format
+MESH_FILE
+./mesh_prism.dat
+FIELD_SOURCE
+z     initialize field to zero
+NREQ
+1               1-scalar problem
+NRSOL
+1               1 - one vector with solution dofs for each element
+BASIS_FUNCTIONS
+t
+PDEG
+302
+FIELD_FILE
+ni ma
+NUMBER_OF_BOUNDARY_CONDITIONS
+0		0-no boundary data (boundary terms given explicitly in the code)
+PENALTY_CONSTANT
+1.0
+SLOPE_LIMITER_SWITCH
+0 
+TIME_INTEGRATION_PARAMETERS
+0 2		1-default time integration scheme, 0-output level: no output 
+IMPLICITNESS_PARAMETER
+1.0
+TIME_STEP_CURRENT_AND_FINAL
+0 0
+TIME_INSTANT_CURRENT_AND_FINAL
+0.0 0.0
+DELTA_TIME_CURRENT_AND_PREVIOUS
+0 0
+CONVERGENCE_TYPE_AND_LIMIT
+0 0.0
+INTERVAL_FOR_DUMPS_STANDARD_AND_GRAPHICS
+0 0 		0-no automatic dumpouts, 0-no automatic graphics output
+LINEAR_SOLVER_PARAMETERS
+1 2		1-single level GMRES solver, 2-convergence data output level
+SOLVER_CONVERGENCE_PARAMETERS
+100 1 1.e-6 	100-max_iter, 1-rel_ini convergence, 1.e-6-convergence treshold
+ADAPTATION_PARAMETERS
+1 2		0-no automatic adaptation, 0-output level: no output 
+ADAPT_INTERVAL_MAXGEN_ETC
+1 9 1		0-interval between adaptations, 4-max_gen, 10-max_gen_diff  
+ADAPT_TOLERANCE_REF_UNREF
+0.001 0.1 	tolerance: 0.005-global level, 0.01-ratio for de-refinements
+
+
+
+
+MAX_GEN - maximal generation of elements
+MAX_GEN_DIFF - 1 - irregularity constraints switched on, 0 - switched off ) 
+

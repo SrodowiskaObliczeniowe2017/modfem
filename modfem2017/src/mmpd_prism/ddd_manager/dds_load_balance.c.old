@@ -1,0 +1,4166 @@
+/************************************************************************
+File dds_load_balance - to perform load balancing for PHP_FEM
+
+!!! simplified version - simple load balancing strategy + each
+!!! subdoamin exchange data only with one other subdomain !!! 
+
+Contains definitions of routines:   
+  ddr_balance_load - to ... (what do you think?)
+
+------------------------------  			
+History:        
+	02.2002 - Krzysztof Banas, initial version		
+*************************************************************************/
+
+#include<stdlib.h>
+#include<stdio.h>
+#include<string.h>
+#include<math.h>
+
+/* interface of the mesh manipulation module */
+#include "mmh_intf.h"	
+
+/* interface of the approximation module */
+#include "aph_intf.h"
+
+/* parallel communication interface specification */
+#include "pch_intf.h"
+
+/* domain decomposition interface specification */
+#include "ddh_intf.h"
+
+/* internal info for domain decomposition manager */
+#include "./ddh_manager.h"
+
+
+/* INTERNAL PROCEDURES */
+
+/*---------------------------------------------------------
+  ddr_order_elems - to order elements for balancing 
+---------------------------------------------------------*/
+void ddr_order_elems(
+  int Mesh_id,        /* in: mesh ID */
+  int Nrelem,         /* in: number of elements on List_i and List_d */ 
+  int* List_el,       /* in/out: list of elements to be sorted */
+  double* List_pos    /* in/out: list of positions used for sorting */
+  );
+
+/*---------------------------------------------------------
+  ddr_add_fam_dofs - to sum up dofs of antecedents to total number of DOFs
+---------------------------------------------------------*/
+int ddr_add_fam_dofs(
+  int Field_id,        /* in: field ID */
+  int El_id,          /* in: local ID of an element to be sent */
+  int* Nr_dofs        /* in/out: number of dofs to be updated */
+  );
+
+/*---------------------------------------------------------
+  ddr_send_elem - to send an element with all its neighbors required by overlap,
+                  and all constitutive entities (faces, edges, vertices)
+---------------------------------------------------------*/
+int ddr_send_elems(
+  int Field_id,        /* in: field ID */
+  int Mesh_id,        /* in: mesh ID */
+  int Nr_elems,       /* in: number of elements to be sent */
+  int* El_ids,         /* in: list of elements */
+  int Recp_id         /* in: recieving processor ID */
+  );
+
+/*---------------------------------------------------------
+  ddr_recv_elems - to receive an element with all its neighbors required 
+                  by overlap and all constitutive entities (faces, edges, etc.)
+---------------------------------------------------------*/
+int ddr_recv_elems(
+  int Field_id,        /* in: field ID */
+  int Mesh_id,        /* in: mesh ID */
+  int Nr_elems,       /* in: number of elements to be received */
+  int Send_id         /* in: sending processor ID */
+  );
+
+/*---------------------------------------------------------
+  sortz - to sort array of indices List_i according to the corresponding values
+          in double List_d (actually List_d is sorted in increasing order)
+	  ... taken from an old fortran book, sorry...
+---------------------------------------------------------*/
+void sortz(
+  int Nrelem,         /* in: number of elements on List_i and List_d */ 
+  int* List_i,        /* in/out: list of indices to be sorted */
+  double* List_d      /* in/out: list of values used for sorting */
+  );
+
+/* end of declarations of INTERNAL PROCEDURES */
+
+/*------------------------------------------------------------
+  ddr_balance_load - to ... (what you think?)
+------------------------------------------------------------*/
+int ddr_balance_load(
+  int Field_id  /* in: field ID */
+  )
+{
+
+  int i, ient, iaux, iel, nel, imbalance, index, nr_sub, nr_elem, nr_elem_ok; 
+  int nr_dofs, nr_dofs_ok, nr_dofs_tot, dofs_imb;
+  int nr_dofs_send_prev, nr_dofs_recv_prev;
+  int nr_dofs_send_next, nr_dofs_recv_next;
+  int buffer_id, sender_imb, el_imb, ipid, mesh_id;
+  int *list_el, start_list, start_dofs;
+  int nr_prev, action_prev; /* numbers of elements and actions' tags: */
+  int nr_next, action_next; /* 1-send, -1-receive, 0-do nothing */
+  double *list_pos;
+  double node_coor[3*MMC_MAXELVNO];  /* coord of element's nodes */
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+  
+  /* simplifying assumption */
+  nr_sub = ddv_nr_proc;
+  if(nr_sub==1) return(1);
+
+  /* select corresponding mesh */
+  mesh_id = apr_get_mesh_id(Field_id);
+
+  /* compute the number of active dofs - basis for load distribution */
+  nr_dofs=0;
+  nel=0;
+  while((nel=mmr_get_next_act_elem(mesh_id, nel))!=0){
+    if(mmr_el_ipid(mesh_id,nel)==0){
+      nr_dofs += apr_get_ent_nrdof(Field_id, APC_ELEMENT, nel);
+    }
+  }
+
+  /* sum up all dofs */
+  nr_dofs_tot = ddr_gath_scat_i(nr_dofs);
+  nr_dofs_ok = nr_dofs_tot/nr_sub;
+
+  /* get info on load imbalance */
+  /* simple version - equal power processors */
+  imbalance=0; dofs_imb=nr_dofs_ok-nr_dofs;
+  if(abs(dofs_imb)>0.0*nr_dofs_ok) imbalance=1;
+
+/*kbw*/
+  printf("processor %d, nr_dofs %d (total %d), nr_dofs_ok %d, dofs imbalance %d\n",
+	 ddv_my_proc_id, nr_dofs, nr_dofs_tot, nr_dofs_ok, dofs_imb);
+/*kew*/
+
+  imbalance = ddr_gath_scat_i(imbalance);
+
+  if(imbalance>0){
+
+    /* begin with assuming no exchange takes place */
+    action_prev=0;
+    nr_dofs_send_prev=0;
+    nr_dofs_recv_prev=0;
+    action_next=0;
+    nr_dofs_send_next=0;
+    nr_dofs_recv_next=0;
+    start_list = 1;
+    start_dofs = 0;
+
+
+    /* FOR MG AND ADAPTIVITY - BALANCING IS BASED ON INITIAL ELEMENTS */
+    nr_elem=0;
+    nel=0;
+    while((nel=mmr_get_next_elem_all(mesh_id, nel))!=0){
+      if(mmr_el_ipid(mesh_id,nel)==0 &&
+	 mmr_el_fam(mesh_id,nel,NULL,NULL)==0) nr_elem++;
+    }
+  
+    /* create lists of elements and their positions */
+    list_el = (int *)malloc((nr_elem+1)*sizeof(int));
+    list_pos = (double *)malloc((nr_elem+1)*sizeof(double));
+
+    nel=0; index=0;
+    while((nel=mmr_get_next_elem_all(mesh_id, nel))!=0){
+      if(mmr_el_ipid(mesh_id,nel)==0 &&
+	 mmr_el_fam(mesh_id,nel,NULL,NULL)==0) {
+
+	index++;
+	list_el[index]=nel;
+	mmr_el_node_coor(mesh_id,nel,NULL,node_coor);
+	list_pos[index]=(node_coor[3*0]+node_coor[3*1]+node_coor[3*2]+
+			 node_coor[3*3]+node_coor[3*4]+node_coor[3*5])/6;
+
+      }
+    }
+
+/*kbw
+    printf("List of %d initial elements and their positions before sorting:\n",
+	   nr_elem);
+    for(i=1;i<=nr_elem;i++){
+      printf("%9d (%8.3lf)",list_el[i],list_pos[i]);
+    }
+    printf("\n");
+/*kew*/
+
+    /* order elements to enable transfer */
+    ddr_order_elems(mesh_id, nr_elem, list_el, list_pos);
+
+/*kbw
+    printf("List of elements after sorting:\n");
+    for(i=1;i<=nr_elem;i++){
+      printf("%5d",list_el[i]);
+    }
+    printf("\n");
+/*kew*/
+
+
+    /* exchange info on elements requested by processors */
+
+    /* exchange info with the preceding processor */
+    if(ddv_my_proc_id>1){
+
+      //  buffer_id = PCC_LO_BA_1;
+      buffer_id = 5555;
+      pcr_buffer_receive(buffer_id, ddv_my_proc_id-1);
+      pcr_buffer_unpack_int(buffer_id, 1, &sender_imb);
+      pcr_buffer_unpack_int(buffer_id, 1, &nr_dofs_recv_prev);
+      pcr_recv_buffer_close(buffer_id);
+
+/*kbw*/
+      printf("\timbalance %d (nr_dofs %d) received from processor %d\n",
+	     sender_imb, nr_dofs_recv_prev, ddv_my_proc_id-1);
+/*kew*/
+
+      /* if preceding processor requests elements (sender_imb==1) */
+      if(sender_imb>0){
+
+	if(nr_dofs_recv_prev>nr_dofs){
+	  printf("Too much elements (dofs) requested, exiting\n");
+	  exit(-1);
+	}
+
+	/* compute the number of initial elements to be send */
+	iaux=0;
+	for(iel=1;iel<=nr_elem;iel++){
+    
+	  nel=list_el[iel];
+	  if(mmr_el_status(mesh_id, nel)==MMC_ACTIVE){
+	    if(mmr_el_ipid(mesh_id,nel)==0){
+	      iaux += apr_get_ent_nrdof(Field_id, APC_ELEMENT, nel);
+	    }
+	  }
+	  else{
+	    
+	    ddr_add_fam_dofs(mesh_id, nel, &iaux);
+
+	  }
+
+	  if(iaux>=nr_dofs_recv_prev) {
+	    sender_imb=iel;
+	    break;
+	  }
+
+	}
+
+/*kbw*/
+	printf("\telements to reach sender imbalance %d (dofs %d)\n",
+	       sender_imb, iaux);
+/*kew*/
+
+	nr_dofs_send_prev = iaux;
+	nr_dofs_recv_prev = 0;
+
+	/* my updated imbalance and initial settings for computing */
+	/* dofs and elements exchanged with the next processor */
+	dofs_imb += nr_dofs_send_prev;
+	start_list = iel+1;
+	start_dofs = 0;
+
+	/* info on requested elements */
+	//  buffer_id = PCC_LO_BA_2;
+	buffer_id = 5556;
+	pcr_send_buffer_open(buffer_id);
+	pcr_buffer_pack_int(buffer_id, 1, &sender_imb);
+	pcr_buffer_pack_int(buffer_id, 1, &nr_dofs_send_prev);
+	pcr_buffer_send(buffer_id, ddv_my_proc_id-1);
+
+	/* data for sending elements to the preceding processor */
+	action_prev = 1;
+	nr_prev = sender_imb;
+
+/*kbw*/
+	printf("\tpreparing to send %d elements (%d dofs) to processor %d\n", 
+	       sender_imb, nr_dofs_send_prev, ddv_my_proc_id-1);
+	printf("updated dofs imbalance - %d\n",
+	       dofs_imb);
+/*kew*/
+
+      }
+      else if(sender_imb<0){
+
+	/* my updated imbalance and initial settings for computing */
+	/* dofs and elements exchanged with the next processor */
+	dofs_imb -= nr_dofs_recv_prev;
+	start_list = 1;
+	start_dofs = nr_dofs_recv_prev;
+	nr_dofs_send_prev = 0;
+
+	/* data for receiving elements from preceding processor */
+	action_prev = -1;
+	nr_prev = -sender_imb;
+
+/*kbw*/
+	printf("\tpreparing to receive %d elements (%d dofs) from processor %d\n",
+	       -sender_imb, nr_dofs_recv_prev, ddv_my_proc_id-1);
+	printf("updated dofs imbalance - %d\n",
+	       dofs_imb);
+/*kew*/
+	
+      }
+
+    }
+
+/*kbw*/
+    if(ddv_my_proc_id==ddv_nr_proc){
+      printf("updated dofs imbalance for the last processor %d - %d\n",
+	     ddv_my_proc_id, dofs_imb);
+    }
+/*kew*/
+
+
+    /* specify list of elements to be sent to the next processor */
+    if(ddv_my_proc_id<ddv_nr_proc){
+
+      /* if subdomain has too much dofs */
+      if(dofs_imb<0){
+
+	if(start_dofs>nr_dofs_ok){
+	  printf("Overlapping send/recieve domains, exiting\n");
+	  exit(-1);
+	}
+
+	/* compute the number of initial elements to be send */
+	iaux=start_dofs;
+	for(iel=start_list;iel<=nr_elem;iel++){
+    
+	  nel=list_el[iel];
+	  if(mmr_el_status(mesh_id, nel)==MMC_ACTIVE){
+	    if(mmr_el_ipid(mesh_id,nel)==0){
+	      iaux += apr_get_ent_nrdof(Field_id, APC_ELEMENT, nel);
+	    }
+	  }
+	  else{
+
+	    ddr_add_fam_dofs(mesh_id, nel, &iaux);
+
+	  }
+
+	  if(iaux>=nr_dofs_ok) {
+	    nr_elem_ok=iel;
+	    break;
+	  }
+
+	}
+
+	el_imb = nr_elem_ok - nr_elem;
+	nr_dofs_send_next = nr_dofs-iaux-nr_dofs_send_prev+nr_dofs_recv_prev;
+	nr_dofs_recv_next = 0;
+
+/*kbw*/
+	printf("\telements %d, elements to reach balance %d - imbalance %d\n", 
+	       nr_elem, nr_elem_ok, el_imb);
+/*kew*/
+
+	if(nr_elem+el_imb<0 || nr_dofs_send_next>nr_dofs){
+	  printf("Too much elements requested, exiting\n");
+	  exit(-1);
+	}
+
+	if(el_imb<0){
+
+	  /* indicate info on elements to be sent */
+	  action_next = 1;
+	  nr_next = -el_imb;
+
+/*kbw*/
+	  printf("\tpreparing to send %d elements (%d dofs) to processor %d\n", 
+		 -el_imb, nr_dofs_send_next, ddv_my_proc_id+1);
+	  dofs_imb += nr_dofs_send_next;
+	  printf("updated dofs imbalance - %d\n",
+		 dofs_imb);
+/*kew*/
+
+	}
+
+
+      }
+      else{
+
+	el_imb = 1;
+	nr_dofs_send_next = dofs_imb;
+
+      }
+
+
+      //  buffer_id = PCC_LO_BA_1;
+      buffer_id = 5555;
+      pcr_send_buffer_open(buffer_id);
+      pcr_buffer_pack_int(buffer_id, 1, &el_imb);
+      pcr_buffer_pack_int(buffer_id, 1, &nr_dofs_send_next);
+      pcr_buffer_send(buffer_id, ddv_my_proc_id+1);
+
+      if(el_imb>0){
+
+	/* receive info on elements to be received from the next processor */
+	//  buffer_id = PCC_LO_BA_2;
+	buffer_id = 5556;
+	pcr_buffer_receive(buffer_id, ddv_my_proc_id+1);
+	pcr_buffer_unpack_int(buffer_id, 1, &el_imb);
+	pcr_buffer_unpack_int(buffer_id, 1, &nr_dofs_recv_next);
+	pcr_recv_buffer_close(buffer_id);
+
+        /* indicate info on elements to be received */
+        action_next = -1;
+	nr_next = el_imb;
+	nr_dofs_send_next = 0;
+
+/*kbw*/
+	printf("\tpreparing to receive %d elements (%d dofs) from processor %d\n", 
+	       el_imb, nr_dofs_recv_next, ddv_my_proc_id+1);
+	dofs_imb -= nr_dofs_recv_next;
+	printf("updated dofs imbalance - %d\n",
+	       dofs_imb);
+/*kew*/
+
+      }
+
+    }
+
+    /* create overlap info to find which entities are owned by target subdomain,
+       which exist in their data structure and which are alien */
+    ddr_mesh_ent_ovl(mesh_id);
+
+    if(action_prev==1){
+      ddr_send_elems(Field_id, mesh_id, nr_prev, &list_el[1], ddv_my_proc_id-1);
+    }
+
+    if(action_next==1){
+      ddr_send_elems(Field_id, mesh_id, nr_next, &list_el[nr_elem+el_imb+1], 
+		     ddv_my_proc_id+1);
+    }
+
+    if(action_prev==-1){
+      ddr_recv_elems(Field_id, mesh_id, nr_prev, ddv_my_proc_id-1);
+    }
+
+    if(action_next==-1){
+      ddr_recv_elems(Field_id, mesh_id, nr_next, ddv_my_proc_id+1);
+    }
+
+    /* free data structure with overlap info */
+    ddr_free_mesh_ovl(mesh_id);
+
+    free(list_el);
+    free(list_pos);
+
+#ifdef DEBUG
+    /* check consistency of IPIDS - all must be non-negative */
+  ient=0;
+  while((ient=mmr_get_next_elem_all(mesh_id, ient))!=0){
+    if(mmr_el_ipid(mesh_id,ient)<0){
+      printf("non-positive ipid for element %d - error in balance_load\n",
+	     ient);
+    }
+  }
+  ient=0;
+  while((ient=mmr_get_next_face_all(mesh_id, ient))!=0){
+    if(mmr_fa_ipid(mesh_id,ient)<0){
+      printf("non-positive ipid for face %d - error in balance_load\n",
+	     ient);
+    }
+  }
+  ient=0;
+  while((ient=mmr_get_next_edge_all(mesh_id, ient))!=0){
+    if(mmr_ed_ipid(mesh_id,ient)<0){
+      printf("non-positive ipid for edge %d - error in balance_load\n",
+	     ient);
+    }
+  }
+  ient=0;
+  while((ient=mmr_get_next_node_all(mesh_id, ient))!=0){
+    if(mmr_ve_ipid(mesh_id,ient)<0){
+      printf("non-positive ipid for vertex %d - error in balance_load\n",
+	     ient);
+    }
+  }
+/*kbw
+  printf("Subdomain %d\n", ddv_my_proc_id);
+  printf("Active elements (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_elem_all(mesh_id, ient))!=0){
+    if(mmr_el_status(mesh_id,ient)==MMC_ACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_el_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_el_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Inactive elements (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_elem_all(mesh_id, ient))!=0){
+    if(mmr_el_status(mesh_id,ient)==MMC_INACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_el_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_el_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Active faces (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_face_all(mesh_id, ient))!=0){
+    if(mmr_fa_status(mesh_id,ient)==MMC_ACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_fa_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_fa_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Inactive faces (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_face_all(mesh_id, ient))!=0){
+    if(mmr_fa_status(mesh_id,ient)==MMC_INACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_fa_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_fa_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Active edges (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_edge_all(mesh_id, ient))!=0){
+    if(mmr_edge_status(mesh_id,ient)==MMC_ACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_ed_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_ed_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Inactive edges (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_edge_all(mesh_id, ient))!=0){
+    if(mmr_edge_status(mesh_id,ient)==MMC_INACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_ed_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_ed_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Vertices (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_node_all(mesh_id, ient))!=0){
+    printf("%d (%d %d), ",
+	   ient, mmr_ve_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	   mmr_ve_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+  }
+  printf("\n");
+/*kew*/
+
+#endif
+
+    /* update overlap */
+    {
+      int gen_lev = 0; int ovl_size = 2;
+      ddr_create_overlap(mesh_id, ovl_size, gen_lev);
+    }
+
+#ifdef DEBUG
+    /* check consistency of IPIDS - all must be non-negative */
+/*kbw
+  printf("Subdomain %d\n", ddv_my_proc_id);
+  printf("Active elements (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_elem_all(mesh_id, ient))!=0){
+    if(mmr_el_status(mesh_id,ient)==MMC_ACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_el_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_el_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Inactive elements (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_elem_all(mesh_id, ient))!=0){
+    if(mmr_el_status(mesh_id,ient)==MMC_INACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_el_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_el_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Active faces (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_face_all(mesh_id, ient))!=0){
+    if(mmr_fa_status(mesh_id,ient)==MMC_ACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_fa_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_fa_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Inactive faces (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_face_all(mesh_id, ient))!=0){
+    if(mmr_fa_status(mesh_id,ient)==MMC_INACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_fa_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_fa_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Active edges (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_edge_all(mesh_id, ient))!=0){
+    if(mmr_edge_status(mesh_id,ient)==MMC_ACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_ed_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_ed_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Inactive edges (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_edge_all(mesh_id, ient))!=0){
+    if(mmr_edge_status(mesh_id,ient)==MMC_INACTIVE){
+      printf("%d (%d %d), ",
+	     ient, mmr_ed_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	     mmr_ed_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+    }
+  }
+  printf("\n");
+  printf("Vertices (owner, local ID): ");
+  ient=0;
+  while((ient=mmr_get_next_node_all(mesh_id, ient))!=0){
+    printf("%d (%d %d), ",
+	   ient, mmr_ve_ipid(mesh_id,ient)/MMC_MAX_NUM_SUB,
+	   mmr_ve_ipid(mesh_id,ient)%MMC_MAX_NUM_SUB);
+  }
+  printf("\n");
+/*kew*/
+
+#endif
+
+  } /* end if imbalance exist */
+
+  return(1);
+}
+
+/*---------------------------------------------------------
+  ddr_add_sons_subd - to add antecedents to subdoamin in a recursive manner
+---------------------------------------------------------*/
+int ddr_add_sons_subd(
+  int Mesh_id,   /* in: mesh ID */
+  int El_id,     /* in: father element */
+  int* List_ind, /* in: list of indicators */
+  int Ind        /* in: indicator to use for marking added elements */
+  );
+
+/*---------------------------------------------------------
+  ddr_send_elems - to send an element and all its neighbors required by overlap,
+		   and all constitutive entities (faces, edges, vertices)
+		   (currently, initial elements are send with all antecedents)
+---------------------------------------------------------*/
+int ddr_send_elems(
+  int Field_id,        /* in: field ID */
+  int Mesh_id,        /* in: mesh ID */
+  int Nr_elems,       /* in: number of elements to be sent */
+  int* El_ids,         /* in: list of elements */
+  int Recp_id         /* in: receiving processor ID */
+  )
+{
+
+  int max_el_id, max_face_id, max_edge_id, max_node_id, pos_list, ipid;
+  int *sub_ind_elem, *sub_ind_face, *sub_ind_edge, *sub_ind_vert;
+  int *ovl_ind_elem, *ovl_ind_face, *ovl_ind_edge, *ovl_ind_vert;
+  int *list_el_ext, *list_fa_ext, *list_ed_ext, *list_ve_ext; 
+  int sub_elem_ind[8], sub_face_ind[8], sub_edge_ind[8], sub_vert_ind[8];
+  int **vert_elems=NULL;
+  int el_faces[MMC_MAXELFAC+1]; /* element faces */
+  int el_nodes[MMC_MAXELVNO+1];
+  int i, iel, nel, iaux, sign, sign_pos, num_faces;
+  int ifa, nfa, face_ngb[2], num_sons, ison, son, face_sons[9];
+  int ied, ned, num_edges, fa_edges[4], face_struct[14];
+  int ino, nno, edge_vert[2], edge_struct[4], elem_struct[20];
+  int ind, owner, buffer_id;
+  int pdeg, nr_sol, num_dofs, sol_vec_id;
+  double dofs_loc[APC_MAXELSD];
+  double ve_coor[3];
+  ddt_mesh_ovl* mesh_ovl_p; 
+
+  int alien_proc=0;
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+
+  /* tagging convention:
+             subdomain     sender     receiver
+       0 -     int          ovl         int (handled as 5 - do nothing)
+       1 -     int          int         ext
+       2 -     int          int         ovl
+       3 -     ovl          int         ext
+       4 -     ovl          int         ovl
+       5 -     ovl          ovl         int
+       6 -     ovl          ovl         ext
+       7 -     ovl          ovl         ovl
+  */
+
+  /* allocate the space for indicators for elements, faces, etc. */
+  max_el_id = mmr_get_max_elem_id(Mesh_id);
+  sub_ind_elem = malloc((max_el_id+1)*sizeof(int));
+  for(i=0;i<=max_el_id;i++) sub_ind_elem[i]=0;
+
+  max_face_id = mmr_get_max_face_id(Mesh_id);
+  sub_ind_face = malloc((max_face_id+1)*sizeof(int));
+  for(i=0;i<=max_face_id;i++) sub_ind_face[i]=0;
+
+  max_edge_id = mmr_get_max_edge_id(Mesh_id);
+  sub_ind_edge = malloc((max_edge_id+1)*sizeof(int));
+  for(i=0;i<=max_edge_id;i++) sub_ind_edge[i]=0;
+
+  max_node_id = mmr_get_max_node_id(Mesh_id);
+  sub_ind_vert = malloc((max_node_id+1)*sizeof(int));
+  for(i=0;i<=max_node_id;i++) sub_ind_vert[i]=0;
+
+
+  /* to save time for searching lists of overlap entities, for each entity */
+  /* taking part in transfer, its position on overlap lists is stored */
+  ovl_ind_elem = malloc((max_el_id+1)*sizeof(int));
+  for(i=0;i<=max_el_id;i++) ovl_ind_elem[i]=0;
+  ovl_ind_face = malloc((max_face_id+1)*sizeof(int));
+  for(i=0;i<=max_face_id;i++) ovl_ind_face[i]=0;
+  ovl_ind_edge = malloc((max_edge_id+1)*sizeof(int));
+  for(i=0;i<=max_edge_id;i++) ovl_ind_edge[i]=0;
+  ovl_ind_vert = malloc((max_node_id+1)*sizeof(int));
+  for(i=0;i<=max_node_id;i++) ovl_ind_vert[i]=0;
+
+
+  /* for elements from the initial list and their antecedents */
+  /* indicate they belong to the interior */ 
+  ind=1; /* internal element indicator */
+  for(iel=0;iel<Nr_elems;iel++){
+    nel = El_ids[iel];
+    sub_ind_elem[nel]=ind;
+    ddr_add_sons_subd(Mesh_id, nel, sub_ind_elem, ind);
+  }
+
+  /* prepare list of element connectivities */
+  vert_elems = malloc((max_node_id+1)*sizeof(int *));
+  for(ino=1;ino<=max_node_id;ino++){
+    vert_elems[ino]=NULL;  
+  }
+  ddr_vert_elems(Mesh_id, vert_elems); 
+
+  /* for elements from the initial list add their not internal neighbors */
+  /* (with all their antecedents) to overlap */
+  ind=3;
+  for(iel=0;iel<Nr_elems;iel++){
+
+    /* for all nodes of an element */
+    mmr_el_node_coor(Mesh_id, El_ids[iel], el_nodes, NULL);
+
+    for(ino=1;ino<=el_nodes[0];ino++){
+
+      nno = el_nodes[ino];
+
+      /* for all elements adjacent to the node */
+      for(iaux=1;iaux<=vert_elems[nno][0];iaux++){ 
+      
+	nel=vert_elems[nno][iaux];
+
+	if(sub_ind_elem[nel]==0) {
+
+	  sub_ind_elem[nel]=ind;
+	  /* add sons */
+	  ddr_add_sons_subd(Mesh_id, nel, sub_ind_elem, ind);
+
+	}
+      }
+    }
+  }
+
+  /* free space */
+  for(ino=1;ino<=max_node_id;ino++) {
+    if(vert_elems[ino]!=NULL) free(vert_elems[ino]);
+  }
+  free(vert_elems);
+
+
+  /* check ipid to find owners of all elements */
+  for(iel=1;iel<=max_el_id;iel++){
+
+    if(sub_ind_elem[iel]==3){
+
+      owner = ddr_get_owner(Mesh_id, MMC_ELEMENT, iel);
+      if(owner==Recp_id){
+	sub_ind_elem[iel]=5;
+      }
+      else if(owner!=ddv_my_proc_id){
+
+	printf("WARNING: another processor appear in exchange - not handled\n");
+	alien_proc=1;
+	sub_ind_elem[iel]=6;
+      }
+
+    }
+  }
+
+  /* data structure for handling overlap computations */
+  mesh_ovl_p = &ddv_mesh_ovls[Mesh_id-1];
+
+  for(iel=0;iel<mesh_ovl_p->nr_elem_ovl[Recp_id-1];iel++){
+
+    nel = mesh_ovl_p->l_elem_ovl_loc[Recp_id-1][iel];
+
+    if(sub_ind_elem[nel]!=0){
+      sub_ind_elem[nel]++;
+      ovl_ind_elem[nel]=iel+1;
+    }
+
+  }
+
+/*kbw*/
+#ifdef DEBUG
+  for(iel=1;iel<=max_el_id;iel++){
+
+    if(sub_ind_elem[iel]>0){
+
+      owner = ddr_get_owner(Mesh_id, MMC_ELEMENT, iel);
+      if(sub_ind_elem[iel]<=4){
+	if(owner!=ddv_my_proc_id){
+	  printf("Error 3214\n");
+	  exit(-1);
+	}
+      }
+      else if(sub_ind_elem[iel]==5){
+	if(owner!=Recp_id){
+	  printf("Error 3314\n");
+	  exit(-1);
+	}
+      }
+      else{
+	if(owner==ddv_my_proc_id || owner==Recp_id){
+	  printf("Error 3414\n");
+	  exit(-1);
+	}
+      }
+
+    }
+  }
+#endif
+/*kew*/
+
+  /* indicate how many entities of different kind exist */
+  for(i=0;i<=7;i++) sub_elem_ind[i]=0;
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]!=0) sub_elem_ind[sub_ind_elem[iel]]++;
+  }
+
+/*kbw
+  printf("%d internal/internal/overlap elements to be send:\n",
+	 sub_elem_ind[2]);
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==2){
+      printf("%d",iel);
+      printf(" (fath %d",mmr_el_fam(Mesh_id, iel,NULL,NULL));
+      if(mmr_el_status(Mesh_id, iel)==MMC_INACTIVE){
+	int el_sons[10];
+	mmr_el_fam(Mesh_id, iel,el_sons,NULL);
+	for(i=1;i<=el_sons[0];i++){
+	  printf(", s%d %d",i,el_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d internal/internal/external elements to be send:\n",
+	 sub_elem_ind[1]);
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==1){
+      printf("%d",iel);
+      printf(" (fath %d",mmr_el_fam(Mesh_id, iel,NULL,NULL));
+      if(mmr_el_status(Mesh_id, iel)==MMC_INACTIVE){
+	int el_sons[10];
+	mmr_el_fam(Mesh_id, iel,el_sons,NULL);
+	for(i=1;i<=el_sons[0];i++){
+	  printf(", s%d %d",i,el_sons[i]);
+	}
+      }
+    }
+  }
+  printf("\n");
+  printf("%d overlap/internal/overlap elements to be send:\n",
+	 sub_elem_ind[4]);
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==4){
+      printf("%d",iel);
+      printf(" (fath %d",mmr_el_fam(Mesh_id, iel,NULL,NULL));
+      if(mmr_el_status(Mesh_id, iel)==MMC_INACTIVE){
+	int el_sons[10];
+	mmr_el_fam(Mesh_id, iel,el_sons,NULL);
+	for(i=1;i<=el_sons[0];i++){
+	  printf(", s%d %d",i,el_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/internal/external elements to be send:\n",
+	 sub_elem_ind[3]);
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==3){
+      printf("%d",iel);
+      printf(" (fath %d",mmr_el_fam(Mesh_id, iel,NULL,NULL));
+      if(mmr_el_status(Mesh_id, iel)==MMC_INACTIVE){
+	int el_sons[10];
+	mmr_el_fam(Mesh_id, iel,el_sons,NULL);
+	for(i=1;i<=el_sons[0];i++){
+	  printf(", s%d %d",i,el_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/internal elements to be send:\n",
+	 sub_elem_ind[5]);
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==5){
+      printf("%d",iel);
+      printf(" (fath %d",mmr_el_fam(Mesh_id, iel,NULL,NULL));
+      if(mmr_el_status(Mesh_id, iel)==MMC_INACTIVE){
+	int el_sons[10];
+	mmr_el_fam(Mesh_id, iel,el_sons,NULL);
+	for(i=1;i<=el_sons[0];i++){
+	  printf(", s%d %d",i,el_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/overlap elements to be send:\n",
+	 sub_elem_ind[7]);
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==7){
+      printf("%d",iel);
+      printf(" (fath %d",mmr_el_fam(Mesh_id, iel,NULL,NULL));
+      if(mmr_el_status(Mesh_id, iel)==MMC_INACTIVE){
+	int el_sons[10];
+	mmr_el_fam(Mesh_id, iel,el_sons,NULL);
+	for(i=1;i<=el_sons[0];i++){
+	  printf(", s%d %d",i,el_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/external elements to be send:\n",
+	 sub_elem_ind[6]);
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==6){
+      printf("%d",iel);
+      printf(" (fath %d",mmr_el_fam(Mesh_id, iel,NULL,NULL));
+      if(mmr_el_status(Mesh_id, iel)==MMC_INACTIVE){
+	int el_sons[10];
+	mmr_el_fam(Mesh_id, iel,el_sons,NULL);
+	for(i=1;i<=el_sons[0];i++){
+	  printf(", s%d %d",i,el_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+/*kew*/
+
+  /* given elements, indicate faces in exchange zones */
+  for(iel=1;iel<=max_el_id;iel++){
+
+    if(sub_ind_elem[iel]!=0){
+
+      mmr_el_faces(Mesh_id, iel, el_faces, NULL);
+
+      for(ifa=0; ifa<el_faces[0]; ifa++){
+
+	nfa=el_faces[ifa+1];
+	owner = ddr_get_owner(Mesh_id, MMC_FACE, nfa);
+
+	if(sub_ind_elem[iel]==1||sub_ind_elem[iel]==2){
+
+	  if(owner==ddv_my_proc_id) sub_ind_face[nfa]=1;
+	  else if(owner == Recp_id) sub_ind_face[nfa]=5;
+	  else {
+	    printf("WARNING: another processor appear in exchange\n");
+	    alien_proc=1;
+	    sub_ind_face[nfa]=6;
+	  }
+	}
+	else{
+
+	  if(sub_ind_face[nfa]==0) {
+
+
+	    if(owner == ddv_my_proc_id) sub_ind_face[nfa]=3;
+	    else if(owner == Recp_id) sub_ind_face[nfa]=5;
+	    else {
+	      printf("WARNING: another processor appear in exchange\n");
+	      alien_proc=1;
+	      sub_ind_face[nfa]=6;
+	    }
+
+	  }
+	}
+      }
+    }
+  } 
+
+  /* check whether sons of all faces are included on lists */
+  {
+    int again;
+
+  recheck:{}
+
+    again=0;
+    for(ifa=1;ifa<=max_face_id;ifa++){
+      if(sub_ind_face[ifa]!=0){
+
+	if(mmr_fa_status(Mesh_id, ifa)==MMC_INACTIVE){
+	  
+	  mmr_fa_fam(Mesh_id, ifa, face_sons, NULL);
+
+	  for(ison=1;ison<=face_sons[0];ison++){
+
+	    son=face_sons[ison];
+
+	    if(sub_ind_face[son] != 0 &&
+	       sub_ind_face[son] != sub_ind_face[ifa]) again=1;
+
+	    sub_ind_face[son] = sub_ind_face[ifa];
+
+/*kbw
+	    printf("face %d, son%d %d, not on list to send !!!!\n",
+		   ifa,ison, son);
+	    getchar();
+/*kew*/
+
+	  }
+	}
+      }
+    }
+    if(again==1) goto recheck;
+  }
+
+
+  /* find whether faces are contained in recipient overlap */
+  for(ifa=0;ifa<mesh_ovl_p->nr_face_ovl[Recp_id-1];ifa++){
+
+    nfa = mesh_ovl_p->l_face_ovl_loc[Recp_id-1][ifa];
+
+    if(sub_ind_face[nfa]!=0){
+      sub_ind_face[nfa]++;
+      ovl_ind_face[nfa]=ifa+1;
+    }
+
+  }
+
+/*kbw*/
+#ifdef DEBUG
+  for(ifa=1;ifa<=max_face_id;ifa++){
+
+    if(sub_ind_face[ifa]!=0){
+
+      owner = ddr_get_owner(Mesh_id, MMC_FACE, ifa);
+      if(sub_ind_face[ifa]<=4){
+	if(owner!=ddv_my_proc_id){
+	  printf("Error 3215\n");
+	  exit(-1);
+	}
+      }
+      else if(sub_ind_face[ifa]==5){
+	if(owner!=Recp_id){
+	  printf("Error 3315\n");
+	  exit(-1);
+	}
+      }
+      else{
+	if(owner==ddv_my_proc_id || owner==Recp_id){
+	  printf("Error 3415\n");
+	  exit(-1);
+	}
+      }
+
+    }
+  }
+#endif
+/*kew*/
+
+  /* indicate how many entities of different kind exist */
+  for(i=0;i<=7;i++) sub_face_ind[i]=0;
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]!=0) sub_face_ind[sub_ind_face[ifa]]++;
+  }
+
+/*kbw
+  printf("%d internal/internal/overlap faces to be send:\n",
+	 sub_face_ind[2]);
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]==2){
+      printf("%d",ifa);
+      printf(" (fath %d", mmr_fa_fam(Mesh_id, ifa, NULL, NULL));
+      if(mmr_fa_status(Mesh_id, ifa)==MMC_INACTIVE){
+	int face_sons[5];
+	mmr_fa_fam(Mesh_id, ifa, face_sons, NULL);
+	for(i=1;i<=face_sons[0];i++){
+	  printf(", s%d %d",i,face_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d internal/internal/external faces to be send:\n",
+	 sub_face_ind[1]);
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]==1){
+      printf("%d",ifa);
+      printf(" (fath %d", mmr_fa_fam(Mesh_id, ifa, NULL, NULL));
+      if(mmr_fa_status(Mesh_id, ifa)==MMC_INACTIVE){
+	int face_sons[5];
+	mmr_fa_fam(Mesh_id, ifa, face_sons, NULL);
+	for(i=1;i<=face_sons[0];i++){
+	  printf(", s%d %d",i,face_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/internal/overlap faces to be send:\n",
+	 sub_face_ind[4]);
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]==4){
+      printf("%d",ifa);
+      printf(" (fath %d", mmr_fa_fam(Mesh_id, ifa, NULL, NULL));
+      if(mmr_fa_status(Mesh_id, ifa)==MMC_INACTIVE){
+	int face_sons[5];
+	mmr_fa_fam(Mesh_id, ifa, face_sons, NULL);
+	for(i=1;i<=face_sons[0];i++){
+	  printf(", s%d %d",i,face_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/internal/external faces to be send:\n",
+	 sub_face_ind[3]);
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]==3){
+      printf("%d",ifa);
+      printf(" (fath %d", mmr_fa_fam(Mesh_id, ifa, NULL, NULL));
+      if(mmr_fa_status(Mesh_id, ifa)==MMC_INACTIVE){
+	int face_sons[5];
+	mmr_fa_fam(Mesh_id, ifa, face_sons, NULL);
+	for(i=1;i<=face_sons[0];i++){
+	  printf(", s%d %d",i,face_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/internal faces to be send:\n",
+	 sub_face_ind[5]);
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]==5){
+      printf("%d",ifa);
+      printf(" (fath %d", mmr_fa_fam(Mesh_id, ifa, NULL, NULL));
+      if(mmr_fa_status(Mesh_id, ifa)==MMC_INACTIVE){
+	int face_sons[5];
+	mmr_fa_fam(Mesh_id, ifa, face_sons, NULL);
+	for(i=1;i<=face_sons[0];i++){
+	  printf(", s%d %d",i,face_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/overlap faces to be send:\n",
+	 sub_face_ind[7]);
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]==7){
+      printf("%d",ifa);
+      printf(" (fath %d", mmr_fa_fam(Mesh_id, ifa, NULL, NULL));
+      if(mmr_fa_status(Mesh_id, ifa)==MMC_INACTIVE){
+	int face_sons[5];
+	mmr_fa_fam(Mesh_id, ifa, face_sons, NULL);
+	for(i=1;i<=face_sons[0];i++){
+	  printf(", s%d %d",i,face_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/external faces to be send:\n",
+	 sub_face_ind[6]);
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]==6){
+      printf("%d",ifa);
+      printf(" (fath %d", mmr_fa_fam(Mesh_id, ifa, NULL, NULL));
+      if(mmr_fa_status(Mesh_id, ifa)==MMC_INACTIVE){
+	int face_sons[5];
+	mmr_fa_fam(Mesh_id, ifa, face_sons, NULL);
+	for(i=1;i<=face_sons[0];i++){
+	  printf(", s%d %d",i,face_sons[i]);
+	}
+      }
+      printf(")\n");
+    }
+  }
+  printf("\n");
+/*kew*/
+
+
+  /* given faces, indicate edges in exchange zones */
+  for(ifa=1;ifa<=max_face_id;ifa++){
+
+    if(sub_ind_face[ifa]!=0){
+
+      num_edges = mmr_fa_edges(Mesh_id, ifa, fa_edges, NULL);
+
+      for(ied=0; ied<num_edges; ied++){
+
+	ned=fa_edges[ied];
+	owner = ddr_get_owner(Mesh_id, MMC_EDGE, ned);
+	
+	if(sub_ind_face[ifa]==1||sub_ind_face[ifa]==2){
+
+	  if(owner==ddv_my_proc_id) sub_ind_edge[ned]=1;
+	  else if(owner == Recp_id) sub_ind_edge[ned]=5;
+	  else {
+	    printf("WARNING: another processor appear in exchange\n");
+	    alien_proc=1;
+	    sub_ind_edge[ned]=6;
+	  }
+
+	}
+	else{
+
+	  if(sub_ind_edge[ned]==0) {
+
+	    if(owner == ddv_my_proc_id) sub_ind_edge[ned]=3;
+	    else if(owner == Recp_id) sub_ind_edge[ned]=5;
+	    else {
+	      printf("WARNING: another processor appear in exchange\n");
+	      alien_proc=1;
+	      sub_ind_edge[ned]=6;
+	    }
+
+	  }
+
+	}
+
+      }
+    }
+  } 
+
+  /* check whether sons of all edges are included on lists */
+  {
+    int again;
+
+  recheck1:{}
+
+    again=0;
+    for(ied=1;ied<=max_edge_id;ied++){
+      if(sub_ind_edge[ied]!=0){
+	
+	if(mmr_edge_status(Mesh_id, ied)==MMC_INACTIVE){
+
+	  mmr_edge_sons(Mesh_id, ied, face_sons);
+
+	  for(ison=0;ison<2;ison++){
+
+	    son=face_sons[ison];
+
+	    if(sub_ind_edge[son]!=0 &&
+	       sub_ind_edge[son]!=sub_ind_edge[ied]) again=1;
+
+	    sub_ind_edge[son] = sub_ind_edge[ied];
+
+/*kbw
+	    printf("edge %d, son%d %d, not on list to send !!!!\n",
+		   ied,ison, son);
+	    getchar();
+/*kew*/
+
+	  }
+	}
+      }
+    }
+    if(again==1) goto recheck1;
+  }
+
+  /* find whether edges are contained in recipient overlap */
+  for(ied=0;ied<mesh_ovl_p->nr_edge_ovl[Recp_id-1];ied++){
+
+    ned = mesh_ovl_p->l_edge_ovl_loc[Recp_id-1][ied];
+
+    if(sub_ind_edge[ned]!=0){
+      sub_ind_edge[ned]++;
+      ovl_ind_edge[ned]=ied+1;
+    }
+
+  }
+
+/*kbw*/
+#ifdef DEBUG
+  for(ied=1;ied<=max_edge_id;ied++){
+
+    if(sub_ind_edge[ied]!=0){
+
+      owner = ddr_get_owner(Mesh_id, MMC_EDGE, ied);
+      if(sub_ind_edge[ied]<=4){
+	if(owner!=ddv_my_proc_id){
+	  printf("Error 3216\n");
+	  exit(-1);
+	}
+      }
+      else if(sub_ind_edge[ied]==5){
+	if(owner!=Recp_id){
+	  printf("Error 3316\n");
+	  exit(-1);
+	}
+      }
+      else{
+	if(owner==ddv_my_proc_id || owner==Recp_id){
+	  printf("Error 3416\n");
+	  exit(-1);
+	}
+      }
+
+    }
+  }
+#endif
+/*kew*/ 
+
+  /* indicate how many entities of different kind exist */
+  for(i=0;i<=7;i++) sub_edge_ind[i]=0;
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]!=0) sub_edge_ind[sub_ind_edge[ied]]++;
+  }
+
+/*kbw
+  printf("%d internal/internal/overlap edges to be send:\n",
+	 sub_edge_ind[2]);
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]==2){
+      printf("%d",ied);
+      if(mmr_edge_status(Mesh_id, ied)==MMC_INACTIVE){
+	int edge_sons[5];
+	mmr_edge_sons(Mesh_id, ied, edge_sons);
+	for(i=0;i<2;i++){
+	  printf(", s%d %d",i,edge_sons[i]);
+	}
+      printf(")");
+      }
+      printf("\n");
+    }
+  }
+  printf("\n");
+  printf("%d internal/internal/external edges to be send:\n",
+	 sub_edge_ind[1]);
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]==1){
+      printf("%d",ied);
+      if(mmr_edge_status(Mesh_id, ied)==MMC_INACTIVE){
+	int edge_sons[5];
+	mmr_edge_sons(Mesh_id, ied, edge_sons);
+	for(i=0;i<2;i++){
+	  printf(", s%d %d",i,edge_sons[i]);
+	}
+      printf(")");
+      }
+      printf("\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/internal/overlap edges to be send:\n",
+	 sub_edge_ind[4]);
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]==4){
+      printf("%d",ied);
+      if(mmr_edge_status(Mesh_id, ied)==MMC_INACTIVE){
+	int edge_sons[5];
+	mmr_edge_sons(Mesh_id, ied, edge_sons);
+	for(i=0;i<2;i++){
+	  printf(", s%d %d",i,edge_sons[i]);
+	}
+      printf(")");
+      }
+      printf("\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/internal/external edges to be send:\n",
+	 sub_edge_ind[3]);
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]==3){
+      printf("%d",ied);
+      if(mmr_edge_status(Mesh_id, ied)==MMC_INACTIVE){
+	int edge_sons[5];
+	mmr_edge_sons(Mesh_id, ied, edge_sons);
+	for(i=0;i<2;i++){
+	  printf(", s%d %d",i,edge_sons[i]);
+	}
+      printf(")");
+      }
+      printf("\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/internal edges to be send:\n",
+	 sub_edge_ind[5]);
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]==5){
+      printf("%d",ied);
+      if(mmr_edge_status(Mesh_id, ied)==MMC_INACTIVE){
+	int edge_sons[5];
+	mmr_edge_sons(Mesh_id, ied, edge_sons);
+	for(i=0;i<2;i++){
+	  printf(", s%d %d",i,edge_sons[i]);
+	}
+      printf(")");
+      }
+      printf("\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/overlap edges to be send:\n",
+	 sub_edge_ind[7]);
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]==7){
+      printf("%d",ied);
+      if(mmr_edge_status(Mesh_id, ied)==MMC_INACTIVE){
+	int edge_sons[5];
+	mmr_edge_sons(Mesh_id, ied, edge_sons);
+	for(i=0;i<2;i++){
+	  printf(", s%d %d",i,edge_sons[i]);
+	}
+      printf(")");
+      }
+      printf("\n");
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/external edges to be send:\n",
+	 sub_edge_ind[6]);
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]==6){
+      printf("%d",ied);
+      if(mmr_edge_status(Mesh_id, ied)==MMC_INACTIVE){
+	int edge_sons[5];
+	mmr_edge_sons(Mesh_id, ied, edge_sons);
+	for(i=0;i<2;i++){
+	  printf(", s%d %d",i,edge_sons[i]);
+	}
+      printf(")");
+      }
+      printf("\n");
+    }
+  }
+  printf("\n");
+/*kew*/
+
+
+  /* given edges, indicate vertices in exchange zones */
+  for(ied=1;ied<=max_edge_id;ied++){
+
+    if(sub_ind_edge[ied]!=0){
+
+      mmr_edge_nodes(Mesh_id, ied, edge_vert);
+
+      for(ino=0;ino<2;ino++){
+
+	nno=edge_vert[ino];
+	owner = ddr_get_owner(Mesh_id, MMC_NODE, nno);
+
+	if(sub_ind_edge[ied]==1||sub_ind_edge[ied]==2){
+
+	  if(owner==ddv_my_proc_id) sub_ind_vert[nno]=1;
+	  else if(owner == Recp_id) sub_ind_vert[nno]=5;
+	  else {
+	    printf("WARNING: another processor appear in exchange\n");
+	    alien_proc=1;
+	    sub_ind_vert[nno]=6;
+	  }
+	}
+	else{
+
+	  if(sub_ind_vert[nno]==0) {
+
+
+	    if(owner == ddv_my_proc_id) sub_ind_vert[nno]=3;
+	    else if(owner == Recp_id) sub_ind_vert[nno]=5;
+	    else {
+	      printf("WARNING: another processor appear in exchange\n");
+	      alien_proc=1;
+	      sub_ind_vert[nno]=6;
+	    }
+
+	  }
+
+     	}
+
+      }
+      
+    }
+  }
+
+
+  /* find whether vertices are contained in recipient overlap */
+  for(ino=0;ino<mesh_ovl_p->nr_vert_ovl[Recp_id-1];ino++){
+
+    nno = mesh_ovl_p->l_vert_ovl_loc[Recp_id-1][ino];
+
+    if(sub_ind_vert[nno]!=0){
+      sub_ind_vert[nno]++;
+      ovl_ind_vert[nno]=ino+1;
+    }
+
+  }
+
+/*kbw*/
+#ifdef DEBUG
+  for(ino=1;ino<=max_node_id;ino++){
+
+    if(sub_ind_vert[ino]!=0){
+
+      owner = ddr_get_owner(Mesh_id, MMC_NODE, ino);
+      if(sub_ind_vert[ino]<=4){
+	if(owner!=ddv_my_proc_id){
+	  printf("Error 3217\n");
+	  exit(-1);
+	}
+      }
+      else if(sub_ind_vert[ino]==5){
+	if(owner!=Recp_id){
+	  printf("Error 3317\n");
+	  exit(-1);
+	}
+      }
+      else{
+	if(owner==ddv_my_proc_id || owner==Recp_id){
+	  printf("Error 3417\n");
+	  exit(-1);
+	}
+      }
+
+    }
+  }
+#endif
+/*kew*/ 
+
+  /* indicate how many entities of different kind exist */
+  for(i=0;i<=7;i++) sub_vert_ind[i]=0;
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]!=0) sub_vert_ind[sub_ind_vert[ino]]++;
+  }
+
+/*kbw
+  printf("%d internal/internal/overlap vertices to be send:\n",
+	 sub_vert_ind[2]);
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]==2){
+      printf("%5d",ino);
+    }
+  }
+  printf("\n");
+  printf("%d internal/internal/external vertices to be send:\n",
+	 sub_vert_ind[1]);
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]==1){
+      printf("%5d",ino);
+    }
+  }
+  printf("\n");
+  printf("%d overlap/internal/overlap vertices to be send:\n",
+	 sub_vert_ind[4]);
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]==4){
+      printf("%5d",ino);
+    }
+  }
+  printf("\n");
+  printf("%d overlap/internal/external vertices to be send:\n",
+	 sub_vert_ind[3]);
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]==3){
+      printf("%5d",ino);
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/internal vertices to be send:\n",
+	 sub_vert_ind[5]);
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]==5){
+      printf("%5d",ino);
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/overlap vertices to be send:\n",
+	 sub_vert_ind[7]);
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]==7){
+      printf("%5d",ino);
+    }
+  }
+  printf("\n");
+  printf("%d overlap/overlap/external vertices to be send:\n",
+	 sub_vert_ind[6]);
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]==6){
+      printf("%5d",ino);
+    }
+  }
+  printf("\n");
+/*kew*/
+
+
+  /* different kinds of entities are treated differently: */
+  /* 1  int/int/ext - send data structure and change ipid */
+  /* 2  int/int/ovl - change of ipid only */
+  /* 3  ovl/int/ext - send data structure */
+  /* 4  ovl/int/ovl - do nothing */
+  /* 5  ovl/ovl/int - do nothing */
+  /* 6  ovl/ovl/ext - |> send request to owner to send an entity without... */
+  /* 7  ovl/ovl/ovl - |> ...changing ipid (for owner this will be ovl/int/ovl */
+  /*                  |> or ovl/int/ext, or even int/int/ovl or int/int/ext */
+  /*                  |> (two last cases when entity belongs to interior of */
+  /*                  |> subdomain previously indicated for exchange)) */ 
+  
+  /* !!! NOT HANDLED CASES WHEN ANOTHER PROCESSOR APPEAR IN EXCHANGE !!! */
+  /* send requests to owners of ovl/ovl/ovl and ovl/ovl/ext entities */
+  /* to send them without changing IPID */
+  /* includes: checking IPIDs of entities, finding owners, sending info to */
+  /* ALL processors, sending requests for chosen entities */
+  /* then: receiving data from ALL processors, rceiving requests, including */
+  /* IDs of requested entities on suitable lists (after checking to which */
+  /* category they belong - they may had been considered already for exchange */
+  /* or they may appear for the first time; all tests for classification have */
+  /* to be repeated for these received entities) */ 
+  if(alien_proc==1){
+    printf("WARNING: another processor appear in exchange - not handled\n");
+    exit(-1);
+  }
+
+  /* make lists of all entities external for recipients - positions on lists */
+  /* will be used for reconstructing connectivities */
+  list_el_ext = (int *)malloc((sub_elem_ind[1]+sub_elem_ind[3])*sizeof(int));
+  list_fa_ext = (int *)malloc((sub_face_ind[1]+sub_face_ind[3])*sizeof(int));
+  list_ed_ext = (int *)malloc((sub_edge_ind[1]+sub_edge_ind[3])*sizeof(int));
+  list_ve_ext = (int *)malloc((sub_vert_ind[1]+sub_vert_ind[3])*sizeof(int));
+
+  pos_list=0;
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==1){
+      list_el_ext[pos_list]=iel;
+      pos_list++;
+      sub_ind_elem[iel] = -pos_list;
+    }
+  }
+
+#ifdef DEBUG
+  if(pos_list!=sub_elem_ind[1]){
+    printf("Error in lists of elements in send elems\n");
+    exit(-1);
+  }
+#endif
+
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==3){
+      list_el_ext[pos_list]=iel;
+      pos_list++;
+      sub_ind_elem[iel] = -pos_list;
+    }
+  }
+
+#ifdef DEBUG
+  if(pos_list!=sub_elem_ind[1]+sub_elem_ind[3]){
+    printf("Error2 in lists of elements in send elems\n");
+    exit(-1);
+  }
+#endif
+
+  pos_list=0;
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]==1){
+      list_fa_ext[pos_list]=ifa;
+      pos_list++;
+      sub_ind_face[ifa] = -pos_list;
+    }
+  }
+
+#ifdef DEBUG
+  if(pos_list!=sub_face_ind[1]){
+    printf("Error in lists of faces in send faces\n");
+    exit(-1);
+  }
+#endif
+
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]==3){
+      list_fa_ext[pos_list]=ifa;
+      pos_list++;
+      sub_ind_face[ifa] = -pos_list;
+    }
+  }
+
+#ifdef DEBUG
+  if(pos_list!=sub_face_ind[1]+sub_face_ind[3]){
+    printf("Error2 in lists of faces in send elems\n");
+    exit(-1);
+  }
+#endif
+
+  pos_list=0;
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]==1){
+      list_ed_ext[pos_list]=ied;
+      pos_list++;
+      sub_ind_edge[ied] = -pos_list;
+    }
+  }
+
+#ifdef DEBUG
+  if(pos_list!=sub_edge_ind[1]){
+    printf("Error in lists of edges in send elems\n");
+    exit(-1);
+  }
+#endif
+
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]==3){
+      list_ed_ext[pos_list]=ied;
+      pos_list++;
+      sub_ind_edge[ied] = -pos_list;
+    }
+  }
+
+#ifdef DEBUG
+  if(pos_list!=sub_edge_ind[1]+sub_edge_ind[3]){
+    printf("Error2 in lists of edges in send elems\n");
+    exit(-1);
+  }
+#endif
+
+  pos_list=0;
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]==1){
+      list_ve_ext[pos_list]=ino;
+      pos_list++;
+      sub_ind_vert[ino] = -pos_list;
+    }
+  }
+
+#ifdef DEBUG
+  if(pos_list!=sub_vert_ind[1]){
+    printf("Error in lists of vertices in send elems\n");
+    exit(-1);
+  }
+#endif
+
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]==3){
+      list_ve_ext[pos_list]=ino;
+      pos_list++;
+      sub_ind_vert[ino] = -pos_list;
+    }
+  }
+
+#ifdef DEBUG
+  if(pos_list!=sub_vert_ind[1]+sub_vert_ind[3]){
+    printf("Error2 in lists of vertices in send elems\n");
+    exit(-1);
+  }
+#endif
+ 
+
+  /* send external vertices */
+  //  buffer_id = PCC_SND_EL_1;
+  buffer_id = 5566;
+  pcr_send_buffer_open(buffer_id);
+  pcr_buffer_pack_int(buffer_id, 1, &sub_vert_ind[1]);
+  pcr_buffer_pack_int(buffer_id, 1, &sub_vert_ind[3]);
+  for(ino=0;ino<sub_vert_ind[1];ino++){
+    nno=list_ve_ext[ino]; 
+#ifdef DEBUG
+    iaux=mmr_ve_ipid(Mesh_id, nno);
+    if(iaux!=0){
+      i=ddr_get_owner(Mesh_id, MMC_NODE, ino);
+      printf("not owned vertex %d, owner %d to send in send elems\n", nno,i);
+      exit(-1);
+    }
+#endif
+    mmr_node_coor(Mesh_id, nno, ve_coor);
+    pcr_buffer_pack_double(buffer_id, 3, ve_coor);
+/*kbw
+  printf("sent vertex %d: local ID %d, coor %.3lf, %.3lf, %.3lf\n",
+	 ino, nno,
+	 ve_coor[0], ve_coor[1], ve_coor[2]);
+/*kew*/
+  }
+  for(ino=sub_vert_ind[1];ino<sub_vert_ind[1]+sub_vert_ind[3];ino++){
+    nno=list_ve_ext[ino];
+    pcr_buffer_pack_int(buffer_id, 1, &nno);
+#ifdef DEBUG
+    iaux=mmr_ve_ipid(Mesh_id, nno);
+    if(iaux!=0){
+      i=ddr_get_owner(Mesh_id, MMC_NODE, ino);
+      printf("not owned vertex %d, owner %d to send in send elems\n", nno,i);
+      exit(-1);
+    }
+#endif
+    mmr_node_coor(Mesh_id, nno, ve_coor);
+    pcr_buffer_pack_double(buffer_id, 3, ve_coor);
+/*kbw
+  printf("sent vertex %d: local ID %d, IPID %d, coor %.3lf, %.3lf, %.3lf\n",
+	 ino, nno, nno*MMC_MAX_NUM_SUB + ddv_my_proc_id, 
+	 ve_coor[0], ve_coor[1], ve_coor[2]);
+/*kew*/
+  }
+  pcr_buffer_send(buffer_id, Recp_id);
+/*kbw
+  printf("\nsent %d node (vertex) structures to processor %d\n\n",
+	 sub_vert_ind[1]+sub_vert_ind[3], Recp_id);
+/*kew*/
+
+  /* send external edges */
+  //  buffer_id = PCC_SND_EL_3;
+  buffer_id = 5576;
+  pcr_send_buffer_open(buffer_id);
+  pcr_buffer_pack_int(buffer_id, 1, &sub_edge_ind[1]);
+  pcr_buffer_pack_int(buffer_id, 1, &sub_edge_ind[3]);
+  for(ied=0;ied<sub_edge_ind[1]+sub_edge_ind[3];ied++){
+    ned=list_ed_ext[ied]; 
+    mmr_edge_structure(Mesh_id, ned, edge_struct);
+#ifdef DEBUG
+    iaux=edge_struct[3];
+    if(iaux!=0){
+      printf("not owned edge %d to send in send elems\n", ned);
+      exit(-1);
+    }
+#endif
+/*kbw
+    if(ied>=sub_edge_ind[1]){
+      printf("sending edge %d, local ID %d, IPID %d, type %d\n",
+	     ied,ned,  ned*MMC_MAX_NUM_SUB + ddv_my_proc_id, edge_struct[0]);
+    }
+    else{
+      printf("sending edge %d, local ID %d, type %d\n",
+	     ied, ned, edge_struct[0]);
+    }
+/*kew*/
+    /* if edge active and stores its nodes */
+    if(edge_struct[0]>0){
+      /* check whether nodes are contained in receiver overlap */
+      for(ino=1;ino<=2;ino++){
+	nno = edge_struct[ino];
+	iaux=ovl_ind_vert[nno];
+	if(iaux!=0){
+	  edge_struct[ino]=mesh_ovl_p->l_vert_ovl_ali[Recp_id-1][iaux-1];
+/*kbw
+	  mmr_node_coor(Mesh_id, nno, ve_coor);
+	  printf("\tnode%d, IPID %d, rcp ovl, id %d, coor: %.3lf, %.3lf, %.3lf\n",
+		 ino, nno*MMC_MAX_NUM_SUB + ddv_my_proc_id,
+		 edge_struct[ino], ve_coor[0], ve_coor[1], ve_coor[2]);
+/*kew*/
+	}
+	else{
+	  ipid=mmr_ve_ipid(Mesh_id, nno);
+	  if(ipid%MMC_MAX_NUM_SUB==Recp_id){
+
+
+	    printf("rcp int existing!!!!!!\n"); getchar();getchar();
+
+	    edge_struct[ino]=ipid/MMC_MAX_NUM_SUB;
+/*kbw
+	    mmr_node_coor(Mesh_id, nno, ve_coor);
+	    printf("\tnode%d, IPID %d, rcp int, id %d, coor: %.3lf, %.3lf, %.3lf\n",
+		   ino, ipid,
+		   edge_struct[ino], ve_coor[0], ve_coor[1], ve_coor[2]);
+/*kew*/
+	  }
+	  else if(ipid==0){
+#ifdef DEBUG
+	    if(sub_ind_vert[nno]>=0){
+	      printf("int vertex %d not ext or ovl for recipient in send elems\n", nno);
+	      exit(-1);
+	    }
+#endif
+	    edge_struct[ino] = sub_ind_vert[nno]+1;
+/*kbw
+	    mmr_node_coor(Mesh_id, nno, ve_coor);
+	    if(-edge_struct[ino]>=sub_vert_ind[1]){
+	      printf("\tnode%d IPID %d, rcp ext, sent pos %d, coor: %.3lf, %.3lf, %.3lf\n",
+		   ino, nno*MMC_MAX_NUM_SUB + ddv_my_proc_id,
+		   edge_struct[ino], ve_coor[0], ve_coor[1], ve_coor[2]);
+	    }
+	    else{
+	      printf("\tnode%d, rcp ext, sent pos %d, coor: %.3lf, %.3lf, %.3lf\n",
+		   ino, 
+		   edge_struct[ino], ve_coor[0], ve_coor[1], ve_coor[2]);
+	    }
+/*kew*/
+	  }
+	  else{
+	    printf("not owned vertex %d for edges in send elems\n", nno);
+	    exit(-1);
+	  }
+	}
+      }
+    } /* end if edge active: edge_struct[0] (type) >0 */ 
+    else if(edge_struct[0]<0){
+      /* check whether son edges are contained in receiver overlap */
+      for(ino=1;ino<=2;ino++){
+	nno = edge_struct[ino];
+	iaux=ovl_ind_edge[nno];
+	if(iaux!=0){
+	  edge_struct[ino]=mesh_ovl_p->l_edge_ovl_ali[Recp_id-1][iaux-1];
+/*kbw
+	  printf("\tson%d, IPID %d, rcp ovl, id %d\n",
+		 ino, ipid, 
+		 edge_struct[ino]);
+/*kew*/
+	}
+	else{
+	  ipid=mmr_ed_ipid(Mesh_id, nno);
+	  if(ipid%MMC_MAX_NUM_SUB==Recp_id){
+
+	    printf("rcp int existing!!!!!!\n"); getchar();getchar();
+
+	    edge_struct[ino]=ipid/MMC_MAX_NUM_SUB;
+/*kbw
+	    printf("\tson%d, IPID %d, rcp int, id %d\n",
+		   ino, ipid, 
+		   edge_struct[ino]);
+/*kew*/
+	  }
+	  else if(ipid==0){
+#ifdef DEBUG
+	    if(sub_ind_edge[nno]>=0){
+	      printf("int edge %d not ext or ovl for recipient in send elems\n", nno);
+	      exit(-1);
+	    }
+#endif
+	    edge_struct[ino] = sub_ind_edge[nno]+1;
+/*kbw
+	    if(-edge_struct[ino]>=sub_edge_ind[1]){
+	      printf("\tson%d IPID %d, rcp ext, sent pos %d\n",
+		     ino, nno*MMC_MAX_NUM_SUB + ddv_my_proc_id,
+		     edge_struct[ino]);
+	    }
+	    else{
+	      printf("\tson%d, rcp ext, sent pos %d\n",
+		     ino, 
+		     edge_struct[ino]);
+	    }
+/*kew*/
+	  }
+	  else{
+	    printf("not owned son %d for edges in send elems\n", nno);
+	    exit(-1);
+	  }
+	}
+      }
+    }
+#ifdef DEBUG
+    else{
+      printf("free space %d  in send elems\n", ned);
+      exit(-1);
+    }
+#endif
+     
+    if(ied<sub_edge_ind[1]){
+      pcr_buffer_pack_int(buffer_id, 3, edge_struct);
+    }
+    else{
+      edge_struct[3]=ned;
+      pcr_buffer_pack_int(buffer_id, 4, edge_struct);
+    }
+  }
+  pcr_buffer_send(buffer_id, Recp_id);
+
+/*kbw
+  printf("\nsent %d edge structures to processor %d\n\n",
+	 sub_edge_ind[1]+sub_edge_ind[3], Recp_id);
+/*kew*/
+
+  /* send external faces */
+  //  buffer_id = PCC_SND_EL_4;
+  buffer_id = 5586;
+  pcr_send_buffer_open(buffer_id);
+  pcr_buffer_pack_int(buffer_id, 1, &sub_face_ind[1]);
+  pcr_buffer_pack_int(buffer_id, 1, &sub_face_ind[3]);
+  for(ifa=0;ifa<sub_face_ind[1]+sub_face_ind[3];ifa++){
+    nfa=list_fa_ext[ifa]; 
+
+    mmr_face_structure(Mesh_id, nfa, face_struct);
+
+    if(face_struct[0]<0){
+      for(i=0;i<4;i++) face_struct[13-i]=face_struct[12-i];
+    }
+
+#ifdef DEBUG
+    iaux=face_struct[1];
+    if(iaux!=0){
+      printf("not owned face %d to send in send elems\n", nfa);
+      exit(-1);
+    }
+#endif
+
+/*kbw
+    if(ifa<sub_face_ind[1]){
+      printf("sending face %d: local ID %d, type %d, bc %d\n",
+	     ifa, nfa, face_struct[0], face_struct[2]);
+    }
+    else {
+      printf("sending face %d: local ID %d, IPID %d, type %d, bc %d\n",
+	     ifa, nfa, nfa*MMC_MAX_NUM_SUB + ddv_my_proc_id, 
+	     face_struct[0], face_struct[2]);
+    }
+/*kew*/
+
+    face_struct[1]=nfa;
+
+    /* encode edge numbers */ 
+    if(abs(face_struct[0])==MMC_QUAD) num_edges=4;
+    else if(abs(face_struct[0])==MMC_TRIA) num_edges=3;
+    /* position (decimal) in orientation indicator and indicator */
+    sign_pos=1; face_struct[9]=0;
+    for(ied=0;ied<num_edges;ied++){
+
+      ned=abs(face_struct[3+ied]);
+
+      /* indicate postion (decimal) in orientation indicator */
+      sign = ned/face_struct[3+ied];
+      face_struct[9] += (sign+1)*sign_pos;
+      sign_pos*=10;
+
+      iaux=ovl_ind_edge[ned];
+      if(iaux!=0){
+
+	/* if face belong to recipient overlap */ 
+	face_struct[3+ied] = mesh_ovl_p->l_edge_ovl_ali[Recp_id-1][iaux-1];
+
+/*kbw
+	{
+	  double coor1[3],coor2[3];
+	  mmr_edge_nodes(Mesh_id, ned, edge_vert);
+	  mmr_node_coor(Mesh_id, edge_vert[0], coor1);
+	  mmr_node_coor(Mesh_id, edge_vert[1], coor2);
+	  if(ied>=sub_edge_ind[1]){
+	    printf("\tedge%d IPID %d, rcp ovl, id %d, center %.3lf %.3lf %.3lf\n",
+		   ied, sign*(ned*MMC_MAX_NUM_SUB + ddv_my_proc_id),
+		   face_struct[3+ied], (coor1[0]+coor2[0])/2,
+		   (coor1[1]+coor2[1])/2, (coor1[2]+coor2[2])/2
+		   );
+	  }
+	  else{
+	    printf("\tedge%d sign %d, rcp ovl, id %d, center %.3lf %.3lf %.3lf\n",
+		   ied, sign,
+		   face_struct[3+ied], (coor1[0]+coor2[0])/2,
+		   (coor1[1]+coor2[1])/2, (coor1[2]+coor2[2])/2
+		   );
+
+	  }
+	}
+/*kew*/
+
+      }
+      else {
+
+	ipid=mmr_ed_ipid(Mesh_id, ned);
+
+	/* if edge owned by recipient */ 
+	if(ipid%MMC_MAX_NUM_SUB==Recp_id){
+
+	    printf("rcp int existing!!!!!!\n"); getchar();getchar();
+
+	  face_struct[3+ied]=ipid/MMC_MAX_NUM_SUB;
+
+/*kbw
+	  {
+	    double coor1[3],coor2[3];
+	    mmr_edge_nodes(Mesh_id, ned, edge_vert);
+	    mmr_node_coor(Mesh_id, edge_vert[0], coor1);
+	    mmr_node_coor(Mesh_id, edge_vert[1], coor2);
+	    printf("\tedge%d IPID %d, rcp int, id %d, center %.3lf %.3lf %.3lf\n",
+		   ied, sign*ipid,
+		   face_struct[3+ied], (coor1[0]+coor2[0])/2,
+		   (coor1[1]+coor2[1])/2, (coor1[2]+coor2[2])/2
+		   );
+	  }
+/*kew*/
+
+	}
+	else if(ipid==0){
+
+#ifdef DEBUG
+	  if(sub_ind_edge[ned]>=0){
+	    printf("int edge %d not ext or ovl for recipient in send elems\n", ned);
+	    exit(-1);
+	  }
+#endif
+
+	  face_struct[3+ied] = sub_ind_edge[ned]+1;
+
+/*kbw
+	  {
+	    double coor1[3],coor2[3];
+	    mmr_edge_nodes(Mesh_id, ned, edge_vert);
+	    mmr_node_coor(Mesh_id, edge_vert[0], coor1);
+	    mmr_node_coor(Mesh_id, edge_vert[1], coor2);
+	    if(ied>=sub_edge_ind[1]){
+	      printf("\tedge%d IPID %d, rcp ext, sent pos %d, center %.3lf %.3lf %.3lf\n",
+		     ied, sign*(ned*MMC_MAX_NUM_SUB + ddv_my_proc_id),
+		     face_struct[3+ied], (coor1[0]+coor2[0])/2,
+		     (coor1[1]+coor2[1])/2, (coor1[2]+coor2[2])/2
+		     );
+	    }
+	    else{
+	      printf("\tedge%d sign %d, rcp ext, sent pos %d, center %.3lf %.3lf %.3lf\n",
+		     ied, sign,
+		     face_struct[3+ied], (coor1[0]+coor2[0])/2,
+		     (coor1[1]+coor2[1])/2, (coor1[2]+coor2[2])/2
+		     );
+
+	    }
+	  }
+/*kew*/
+
+	}
+	else{
+	  printf("not owned edge %d for faces in send elems\n", ned);
+	  exit(-1);
+	}
+      } /* end if not in recipient overlap */
+
+    } /* end loop over face edges */ 
+
+    /* encode neighbors numbers */
+    for(iel=0;iel<2;iel++){
+
+      nel=face_struct[7+iel];
+
+      if(nel==-2){
+	printf("face %d to be sent on inter-subdomain boundary in send elems\n",
+	       ned);
+	exit(-1);
+      }
+      else if(nel>0){
+	/* if equal size element as face neighbor */
+     
+	iaux=ovl_ind_elem[nel];
+
+	if(iaux!=0){
+
+	  /* if element belong to recipient overlap */ 
+	  face_struct[7+iel] = mesh_ovl_p->l_elem_ovl_ali[Recp_id-1][iaux-1];
+
+/*kbw
+	  if(nfa>0){
+	    double node_coor[3*MMC_MAXELVNO]; 
+	    mmr_el_node_coor(Mesh_id, nel, NULL, node_coor);
+	    printf("\tneig%d, IPID %d, rcp ovl, id %d, center: %.3lf %.3lf %.3lf\n", 
+		   iel, nel*MMC_MAX_NUM_SUB + ddv_my_proc_id,
+		   face_struct[7+iel],
+		   (node_coor[3*0]+node_coor[3*1]+node_coor[3*2]+
+		    node_coor[3*3]+node_coor[3*4]+node_coor[3*5])/6,
+		   (node_coor[3*0+1]+node_coor[3*1+1]+node_coor[3*2+1]+
+		    node_coor[3*3+1]+node_coor[3*4+1]+node_coor[3*5+1])/6,
+		   (node_coor[3*0+2]+node_coor[3*1+2]+node_coor[3*2+2]+
+		    node_coor[3*3+2]+node_coor[3*4+2]+node_coor[3*5+2])/6
+		   );
+	  }
+/*kew*/
+	}
+	else{
+
+	  ipid=mmr_el_ipid(Mesh_id, nel);
+
+	  /* if element owned by recipient */
+	  if(ipid%MMC_MAX_NUM_SUB==Recp_id){
+
+	    printf("rcp int existing!!!!!!\n"); getchar();getchar();
+
+	    face_struct[7+iel]=ipid/MMC_MAX_NUM_SUB;
+
+/*kbw
+	    if(nfa>0){
+	      double node_coor[3*MMC_MAXELVNO]; 
+	      mmr_el_node_coor(Mesh_id, nel, NULL, node_coor);
+	      printf("\tneig%d, IPID %d, rcp int, id %d, center: %.3lf %.3lf %.3lf\n", 
+		     iel, ipid,
+		     face_struct[7+iel],
+		     (node_coor[3*0]+node_coor[3*1]+node_coor[3*2]+
+		      node_coor[3*3]+node_coor[3*4]+node_coor[3*5])/6,
+		     (node_coor[3*0+1]+node_coor[3*1+1]+node_coor[3*2+1]+
+		      node_coor[3*3+1]+node_coor[3*4+1]+node_coor[3*5+1])/6,
+		     (node_coor[3*0+2]+node_coor[3*1+2]+node_coor[3*2+2]+
+		      node_coor[3*3+2]+node_coor[3*4+2]+node_coor[3*5+2])/6
+		   );
+	    }
+/*kew*/
+	   
+	  }
+	  else if(ipid==0){
+
+#ifdef DEBUG
+	    if(sub_ind_elem[nel]>0){
+	      printf("int elem %d not ext or ovl for recipient in send elems\n", ned);
+	      exit(-1);
+	    }
+#endif
+
+	    if(sub_ind_elem[nel]==0){
+
+	      /* for neighbors not send indicate intersubdomain boundary */
+	      face_struct[7+iel] = -2;
+
+	    }
+	    else{
+
+	      /* position on list send plus shift -3 */
+	      face_struct[7+iel] = sub_ind_elem[nel]+1-3;
+
+/*kbw
+	      if(nfa>0){
+		double node_coor[3*MMC_MAXELVNO];  
+		mmr_el_node_coor(Mesh_id, nel, NULL, node_coor);
+		printf("\tneig%d, IPID %d, rcp ext, send pos %d, center: %.3lf %.3lf %.3lf\n", 
+		       iel, nel*MMC_MAX_NUM_SUB + ddv_my_proc_id,
+		       face_struct[7+iel]+3,
+		       (node_coor[3*0]+node_coor[3*1]+node_coor[3*2]+
+			node_coor[3*3]+node_coor[3*4]+node_coor[3*5])/6,
+		       (node_coor[3*0+1]+node_coor[3*1+1]+node_coor[3*2+1]+
+			node_coor[3*3+1]+node_coor[3*4+1]+node_coor[3*5+1])/6,
+		       (node_coor[3*0+2]+node_coor[3*1+2]+node_coor[3*2+2]+
+			node_coor[3*3+2]+node_coor[3*4+2]+node_coor[3*5+2])/6
+		       );
+	      }
+/*kew*/
+	    }
+	  }
+	  else{
+	    printf("not owned neighbor %d for faces in send elems\n", nel);
+	    exit(-1);
+	  }
+	} /* end if not in recipient overlap */
+      } /* end if equal size element as face neighbor */
+      else{
+
+/*kbw
+	if(nfa>0){
+	  printf("\tneig%d  - %d, big neighbor or boundary\n", iel, nel);
+	}
+/*kew*/
+
+      }
+
+    } /* end loop over neighbors */
+
+    /* if face refined and stores its sons' IDs */
+    if(face_struct[0]<0){
+
+      /*kb!!! assumed isotropic refinement */
+      num_sons=4;
+
+      /* loop over sons */
+      for(ison=0;ison<num_sons;ison++){
+	son=face_struct[10+ison];
+
+
+#ifdef DEBUG
+	iaux=ovl_ind_face[son];
+	ipid=mmr_fa_ipid(Mesh_id, son);
+
+	/* if face belong to recipient interior or overlap */ 
+	if(iaux!=0 || ipid!=0){
+	  printf("rcp ext face %d has not rcp ext son %d in send elems\n", nfa, son);
+	  exit(-1);
+	}
+#endif
+	
+#ifdef DEBUG
+	if(sub_ind_face[son]>=0){
+	  printf("int face %d not ext for recipient in send elems\n", son);
+	  exit(-1);
+	}
+#endif
+	face_struct[10+ison] = sub_ind_face[son]+1;
+/*kbw
+	if(-face_struct[10+ison]>=sub_face_ind[1]){
+	  printf("\tson%d, IPID %d, rcp ext, pos send %d\n", 
+		 ison, son*MMC_MAX_NUM_SUB + ddv_my_proc_id,
+		 face_struct[10+ison]);
+	}
+	else{
+	  printf("\tson%d, rcp ext, pos send %d\n", 
+		 ison, face_struct[10+ison]);
+	}
+/*kew*/
+
+      } /* end loop over sons */
+    
+    } /* end if inactive face */
+
+    pcr_buffer_pack_int(buffer_id, 10, face_struct);
+    if(face_struct[0]<0){
+      pcr_buffer_pack_int(buffer_id, 4, &face_struct[10]);
+    }
+
+  }  /* end loop over sent faces */
+
+  pcr_buffer_send(buffer_id, Recp_id);
+/*kbw
+  printf("\nsent %d face structures to processor %d\n\n",
+	 sub_face_ind[1]+sub_face_ind[3], Recp_id);
+/*kew*/
+
+  
+  /* send external elements */
+  //  buffer_id = PCC_SND_EL_5;
+  buffer_id = 5596;
+  pcr_send_buffer_open(buffer_id);
+  pcr_buffer_pack_int(buffer_id, 1, &sub_elem_ind[1]);
+  pcr_buffer_pack_int(buffer_id, 1, &sub_elem_ind[3]);
+
+  /*kb!!! assumed isotropic refinement */
+  num_sons=8;
+
+  for(iel=0;iel<sub_elem_ind[1]+sub_elem_ind[3];iel++){
+    nel=list_el_ext[iel]; 
+
+    mmr_elem_structure(Mesh_id, nel, elem_struct);
+    if(elem_struct[0]<0){
+      for(i=0;i<num_sons;i++) elem_struct[19-i]=elem_struct[18-i];
+    }
+
+
+#ifdef DEBUG
+    iaux=elem_struct[1];
+    if(iaux!=0){
+      printf("not owned elem %d to send in send elems\n", nel);
+      exit(-1);
+    }
+    iaux=elem_struct[4];
+    if(elem_struct[0]<0&&iaux!=MMC_REF_ISO){
+      printf("not isotropically refined elem %d to send in send elems\n", nel);
+      exit(-1);
+    }
+#endif
+
+/*kbw
+    if(elem_struct[3]>0){
+      if(iel<sub_elem_ind[1]){
+	printf("sending elem %d: local ID %d, fath %d, fath_pos %d, refi %d\n",
+	       iel, nel, elem_struct[3],
+	       sub_ind_elem[elem_struct[3]]+1, elem_struct[4]);
+      }
+      else {
+	iaux=sub_ind_elem[elem_struct[3]]+1;
+	printf("sending elem %d: local ID %d, IPID %d, fath %d, fath_pos %d, fath_IPID %d\n",
+	       iel, nel, nel*MMC_MAX_NUM_SUB + ddv_my_proc_id, 
+	       elem_struct[3], 
+	       iaux, list_el_ext[-iaux]*MMC_MAX_NUM_SUB + ddv_my_proc_id);
+      }
+    }
+    else{
+      if(iel<sub_elem_ind[1]){
+	printf("sending elem %d: local ID %d, type %d, no fath %d, refi %d\n",
+	       iel, nel, elem_struct[0], 
+	       elem_struct[3], elem_struct[4]);
+      }
+      else {
+	printf("sending elem %d: local ID %d, IPID %d, type %d, no fath %d, refi %d\n",
+	       iel, nel, nel*MMC_MAX_NUM_SUB + ddv_my_proc_id, 
+	       elem_struct[0], 
+	       elem_struct[3], elem_struct[4]);
+      }
+    }
+/*kew*/
+
+    elem_struct[1]=nel;
+
+    /* if father exist - it is also sent - its position gets encoded */
+    if(elem_struct[3]>0){
+
+      elem_struct[3]=sub_ind_elem[elem_struct[3]];
+
+    }
+
+    /* encode face IDs */ 
+    if(abs(elem_struct[0])==MMC_PRISM) num_faces=5;
+    else if(abs(elem_struct[0])==MMC_BRICK) num_faces=6;
+    else if(abs(elem_struct[0])==MMC_TETRA) num_faces=4;
+    
+    /* position (decimal) in orientation indicator and indicator */
+    sign_pos=1; elem_struct[11]=0;
+
+    for(ifa=0;ifa<num_faces;ifa++) {
+
+      nfa = abs(elem_struct[5+ifa]);
+
+      /* indicate postion (decimal) in orientation indicator */
+      sign = nfa/elem_struct[5+ifa];
+      elem_struct[11] += (sign+1)*sign_pos;
+      sign_pos*=10;
+
+      iaux=ovl_ind_face[nfa];
+      if(iaux!=0){
+
+	/* if face belongs to recipient overlap */ 
+	elem_struct[5+ifa] = mesh_ovl_p->l_face_ovl_ali[Recp_id-1][iaux-1];
+
+/*kbw
+	if(elem_struct[5+ifa]>0){
+	  if(ifa<sub_face_ind[1]){
+	    printf("\tface%d, sign %d, rcp ovl, id %d\n",
+		   ifa, sign, elem_struct[5+ifa]);
+	  }
+	  else {
+	    printf("\tface%d, sign %d, IPID %d, rcp ovl, send pos %d\n",
+		   ifa, sign, nfa*MMC_MAX_NUM_SUB + ddv_my_proc_id, 
+		   elem_struct[5+ifa]);
+	  }
+	}
+/*kew*/
+
+      }
+      else{
+
+	ipid=mmr_fa_ipid(Mesh_id, nfa);
+
+	/* if face owned by recipient */ 
+	if(ipid%MMC_MAX_NUM_SUB==Recp_id){
+
+	    printf("rcp int existing!!!!!!\n"); getchar();getchar();
+
+	  elem_struct[5+ifa]=ipid/MMC_MAX_NUM_SUB;
+	}
+	else if(ipid==0){
+
+#ifdef DEBUG
+	  if(sub_ind_face[nfa]>=0){
+	    printf("int face %d not ext or ovl for recipient in send elems\n", nfa);
+	    exit(-1);
+	  }
+#endif
+
+	  elem_struct[5+ifa]=sub_ind_face[nfa]+1;
+
+/*kbw
+    if(ifa<sub_face_ind[1]){
+      printf("face%d, rcp ext, send pos %d\n",
+	     ifa, elem_struct[5+ifa]);
+    }
+    else {
+      printf("face%d, IPID %d, rcp ext, send pos %d\n",
+	     ifa, nfa*MMC_MAX_NUM_SUB + ddv_my_proc_id, elem_struct[5+ifa]);
+    }
+/*kew*/
+	}
+	else{
+	  printf("not owned face %d for int elem in send elems\n", nfa);
+	  exit(-1);
+	}
+      } /* end if not in recipient overlap */
+
+    } /* end loop over elem faces */
+  
+    pcr_buffer_pack_int(buffer_id, 12, elem_struct);
+
+
+    /* if elem refined and stores its sons' IDs */
+    if(elem_struct[0]<0){
+      for(ison=0;ison<num_sons;ison++){
+	son = elem_struct[12+ison];
+
+#ifdef DEBUG
+	iaux=ovl_ind_elem[son];
+	ipid=mmr_el_ipid(Mesh_id, son);
+
+	/* if elem belong to recipient interior or overlap */ 
+	if(iaux!=0 || ipid!=0){
+	  printf("rcp ext elem %d has not rcp ext son %d in send elems\n", nel, son);
+	  exit(-1);
+	}
+#endif
+	
+#ifdef DEBUG
+	if(sub_ind_elem[son]>=0){
+	  printf("int elem %d not ext for recipient in send elems\n", son);
+	  exit(-1);
+	}
+#endif
+	elem_struct[12+ison] = sub_ind_elem[son]+1;
+/*kbw
+	if(elem_struct[12+ison]<sub_elem_ind[1]){
+	  printf("\tson%d, rcp ext, pos send %d\n", 
+		 ison, 
+		 elem_struct[12+ison]);
+	}
+	else{
+	  printf("\tson%d, IPID %d, rcp ext, pos send %d\n", 
+		 ison, mmr_el_ipid(Mesh_id, son),
+		 elem_struct[12+ison]);
+	}
+/*kew*/
+
+
+
+      } /* end loop over sons */
+
+      pcr_buffer_pack_int(buffer_id, num_sons, &elem_struct[12]);
+
+    } /* end if inactive elem */
+
+    /* for active elements send dofs */
+    if(elem_struct[0]>0){
+      pdeg=apr_get_ent_pdeg(Field_id,APC_ELEMENT,nel);
+      pcr_buffer_pack_int(buffer_id, 1, &pdeg);
+      nr_sol=apr_get_nr_sol(Field_id);
+      num_dofs=apr_get_nreq(Field_id)*apr_get_pdeg_nrdofs(Field_id,pdeg);
+      sol_vec_id=1;
+      apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+      pcr_buffer_pack_double(buffer_id, num_dofs, dofs_loc);
+/*kbw
+	printf("sending elem %d, pdeg %d, num_dofs %d, dofs:\n",
+	       nel, pdeg, num_dofs);
+	for(i=0;i<num_dofs;i++) printf("%lf  ", dofs_loc[i]);
+	printf("\n");
+/*kew*/
+      if(nr_sol>1){
+	sol_vec_id=2;
+	apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+	pcr_buffer_pack_double(buffer_id, num_dofs, dofs_loc);
+      }
+      if(nr_sol>2){
+	sol_vec_id=3;
+	apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+	pcr_buffer_pack_double(buffer_id, num_dofs, dofs_loc);
+      }
+    }
+
+
+  } /* end loop over sent elems */
+
+  pcr_buffer_send(buffer_id, Recp_id);
+  
+/*kbw
+  printf("\nsent %d element structures to processor %d\n\n",
+	 sub_elem_ind[1]+sub_elem_ind[3], Recp_id);
+/*kew*/
+
+
+
+  /* receive new IPID of created entities */
+  //  buffer_id = PCC_SND_EL_2;
+  buffer_id = 5766;
+  pcr_buffer_receive(buffer_id, Recp_id);
+  for(ino=0;ino<sub_vert_ind[1];ino++){
+    nno=list_ve_ext[ino]; 
+    pcr_buffer_unpack_int(buffer_id, 1, &iaux);
+    iaux = iaux*MMC_MAX_NUM_SUB + Recp_id;
+    mmr_ve_set_ipid(Mesh_id, nno, iaux);
+/*kbw
+    printf("vertex %d: local ID %d, received new_IPID %d\n",
+	   ino, nno, iaux);
+/*kew*/
+  }
+
+  for(ied=0;ied<sub_edge_ind[1];ied++){
+    ned=list_ed_ext[ied];
+    pcr_buffer_unpack_int(buffer_id, 1, &iaux);
+    iaux = iaux*MMC_MAX_NUM_SUB + Recp_id;
+    mmr_ed_set_ipid(Mesh_id, ned, iaux);
+/*kbw
+    printf("edge %d, local_id %d, received new_IPID %d\n",
+	   ied, ned, iaux);
+/*kew*/
+  }
+
+  for(ifa=0;ifa<sub_face_ind[1];ifa++){
+    nfa=list_fa_ext[ifa];
+    pcr_buffer_unpack_int(buffer_id, 1, &iaux);
+    iaux = iaux*MMC_MAX_NUM_SUB + Recp_id;
+    mmr_fa_set_ipid(Mesh_id, nfa, iaux);
+/*kbw
+    if(nfa>0){
+      printf("face %d: local ID %d, received new_IPID %d\n",
+	     ifa, nfa, iaux);
+    }
+/*kew*/
+  }
+
+  for(iel=0;iel<sub_elem_ind[1];iel++){
+    nel=list_el_ext[iel];
+    pcr_buffer_unpack_int(buffer_id, 1, &iaux);
+    iaux = iaux*MMC_MAX_NUM_SUB + Recp_id;
+    mmr_el_set_ipid(Mesh_id, nel, iaux);
+/*kbw
+    printf("element %d, local ID %d, received new_IPID %d\n",
+	   iel, nel, iaux);
+/*kew*/
+  }
+
+/*kbw
+  printf("\nreceived %d vert, %d edge, %d face and %d elem IPIDs from processor %d\n\n",
+	 sub_vert_ind[1], sub_edge_ind[1], sub_face_ind[1], 
+	 sub_elem_ind[1],  Recp_id);
+/*kew*/
+
+  pcr_recv_buffer_close(buffer_id);
+
+  /* exchange IPIDs for sub_..._ind[2] */
+
+  /* send recipient IDs of entities */
+  //  buffer_id = PCC_SND_EL_6;
+  buffer_id = 5597;
+  pcr_send_buffer_open(buffer_id);
+
+
+  pcr_buffer_pack_int(buffer_id, 1, &sub_vert_ind[2]);
+  
+  for(ino=1;ino<=max_node_id;ino++){
+    if(sub_ind_vert[ino]==2){
+      nno=ino; 
+#ifdef DEBUG
+      if(ovl_ind_vert[nno]<=0){
+	printf("not overlap vert %d to exchange IPIDs in send_vert!\n",
+	       nno, ovl_ind_vert[nno]);
+	exit(-1);
+      }     
+#endif
+      iaux = mesh_ovl_p->l_vert_ovl_ali[Recp_id-1][ovl_ind_vert[nno]-1];
+      pcr_buffer_pack_int(buffer_id, 1, &iaux);
+
+      mmr_ve_set_ipid(Mesh_id, nno, iaux*MMC_MAX_NUM_SUB + Recp_id);
+
+/*kbw
+      printf("vert %d: local ID %d, setting new ipid %d\n", 
+	     ino, nno, iaux*MMC_MAX_NUM_SUB + Recp_id );
+/*kew*/
+    }
+  }
+
+  pcr_buffer_pack_int(buffer_id, 1, &sub_edge_ind[2]);
+  
+  for(ied=1;ied<=max_edge_id;ied++){
+    if(sub_ind_edge[ied]==2){
+      ned=ied; 
+#ifdef DEBUG
+      if(ovl_ind_edge[ned]<=0){
+	printf("not overlap edge %d to exchange IPIDs in send_edge!\n",
+	       ned, ovl_ind_edge[ned]);
+	exit(-1);
+      }     
+#endif
+      iaux = mesh_ovl_p->l_edge_ovl_ali[Recp_id-1][ovl_ind_edge[ned]-1];
+      pcr_buffer_pack_int(buffer_id, 1, &iaux);
+      mmr_edge_structure(Mesh_id, ied, edge_struct);
+      pcr_buffer_pack_int(buffer_id, 1, edge_struct);
+
+      mmr_ed_set_ipid(Mesh_id, ned, iaux*MMC_MAX_NUM_SUB + Recp_id);
+
+/*kbw
+      printf("edge %d: local ID %d, type %d, setting new ipid %d\n", 
+	     ied, ned, edge_struct[0], iaux*MMC_MAX_NUM_SUB + Recp_id );
+/*kew*/
+    }
+  }
+
+  pcr_buffer_pack_int(buffer_id, 1, &sub_face_ind[2]);
+  
+  for(ifa=1;ifa<=max_face_id;ifa++){
+    if(sub_ind_face[ifa]==2){
+      nfa=ifa; 
+#ifdef DEBUG
+      if(ovl_ind_face[nfa]<=0){
+	printf("not overlap face %d to exchange IPIDs in send_face!\n",
+	       nfa, ovl_ind_face[nfa]);
+	exit(-1);
+      }     
+#endif
+      iaux = mesh_ovl_p->l_face_ovl_ali[Recp_id-1][ovl_ind_face[nfa]-1];
+      pcr_buffer_pack_int(buffer_id, 1, &iaux);
+
+      mmr_fa_set_ipid(Mesh_id, nfa, iaux*MMC_MAX_NUM_SUB + Recp_id);
+
+/* if one of face's neighbors is external to recipient - send its pos */
+      mmr_fa_eq_neig(Mesh_id, nfa, face_ngb, NULL, NULL);
+
+/*kbw
+      printf("face %d: local ID %d, ngb1 %d, ngb2 %d, setting new ipid %d\n", 
+	     ifa, nfa, face_ngb[0], face_ngb[1],
+	     iaux*MMC_MAX_NUM_SUB + Recp_id );
+      printf("pos in ovl for neig0 %d, neig1 %d\n",
+	     ovl_ind_elem[face_ngb[0]],ovl_ind_elem[face_ngb[1]]);
+      printf("sub_ind indicator for neig0 %d, for neig1 %d\n",
+	     sub_ind_elem[face_ngb[0]],sub_ind_elem[face_ngb[1]]);
+/*kew*/
+
+/*kb!!!
+      nel=face_ngb[0];
+      if(nel>0){
+	if(ovl_ind_elem[nel]<=0&&sub_ind_elem[nel]>=0){
+	  i=mesh_ovl_p->l_elem_ovl_ali[Recp_id-1][ovl_ind_elem[face_ngb[0]]-1];
+	  pcr_buffer_pack_int(buffer_id, 1, &i);
+/*kbw
+	  printf("face %d: sending neighbor0: local ID %d, rcp ID %d\n", 
+		 ifa, nel, i);
+/*kew*/
+/*kb!!!
+          i=0;
+	  pcr_buffer_pack_int(buffer_id, 1, &i);
+	}
+/*kb!!!
+	else if(ovl_ind_elem[nel]<=0&&sub_ind_elem[nel]<0){
+	  pcr_buffer_pack_int(buffer_id, 1, &sub_ind_elem[nel]);
+          i=0;
+	  pcr_buffer_pack_int(buffer_id, 1, &i);
+
+      printf("face %d: sending neighbor0: local ID %d, pos. %d\n", 
+	     ifa, nel, sub_ind_elem[nel] );
+	}
+/*kb!!!
+      }
+      nel=face_ngb[1];
+      if(nel>0){
+	if(ovl_ind_elem[nel]<=0&&sub_ind_elem[nel]>=0){
+	  i=mesh_ovl_p->l_elem_ovl_ali[Recp_id-1][ovl_ind_elem[face_ngb[1]]-1];
+	  pcr_buffer_pack_int(buffer_id, 1, &i);
+/*kbw
+	  printf("face %d: sending neighbor0: local ID %d, rcp ID %d\n", 
+		 ifa, nel, i);
+/*kew*/
+/*kb!!!
+          i=1;
+	  pcr_buffer_pack_int(buffer_id, 1, &i);
+	}
+/*kb!!!
+	else if(ovl_ind_elem[nel]<=0&&(sub_ind_elem[nel]==1||sub_ind_elem[nel]==3)){
+	  pcr_buffer_pack_int(buffer_id, 1, &sub_ind_elem[nel]);
+          i=1;
+	  pcr_buffer_pack_int(buffer_id, 1, &i);
+	  printf("face %d: sending neighbor1: local ID %d, pos. %d\n", 
+	     ifa, nel, sub_ind_elem[nel] );
+	}
+/*kb!!!
+      }
+/*kb!!!*/
+    }
+  }
+
+  pcr_buffer_pack_int(buffer_id, 1, &sub_elem_ind[2]);
+  
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==2){
+      nel=iel; 
+#ifdef DEBUG
+      if(ovl_ind_elem[nel]<=0){
+	printf("not overlap element %d to exchange IPIDs in send_elem!\n",
+	       nel, ovl_ind_elem[nel]);
+	exit(-1);
+      }     
+#endif
+      iaux = mesh_ovl_p->l_elem_ovl_ali[Recp_id-1][ovl_ind_elem[nel]-1];
+      pcr_buffer_pack_int(buffer_id, 1, &iaux);
+
+      mmr_el_set_ipid(Mesh_id, nel, iaux*MMC_MAX_NUM_SUB + Recp_id);
+
+/*kbw
+      printf("element %d: local ID %d, setting new ipid %d\n", 
+	     iel, nel, iaux*MMC_MAX_NUM_SUB + Recp_id );
+/*kew*/
+      /* for active elements send dofs */
+      if(mmr_el_status(Mesh_id,nel)==MMC_ACTIVE){
+	pdeg=apr_get_ent_pdeg(Field_id,APC_ELEMENT,nel);
+	pcr_buffer_pack_int(buffer_id, 1, &pdeg);
+	nr_sol=apr_get_nr_sol(Field_id);
+	num_dofs=apr_get_nreq(Field_id)*apr_get_pdeg_nrdofs(Field_id,pdeg);
+	sol_vec_id=1;
+	apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+	pcr_buffer_pack_double(buffer_id, num_dofs, dofs_loc);
+/*kbw
+	printf("sending elem %d, pdeg %d, num_dofs %d, dofs:\n",
+	       nel, pdeg, num_dofs);
+	for(i=0;i<num_dofs;i++) printf("%lf  ", dofs_loc[i]);
+	printf("\n");
+/*kew*/
+	if(nr_sol>1){
+	  sol_vec_id=2;
+	  apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+	  pcr_buffer_pack_double(buffer_id, num_dofs, dofs_loc);
+	}
+	if(nr_sol>2){
+	  sol_vec_id=3;
+	  apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+	  pcr_buffer_pack_double(buffer_id, num_dofs, dofs_loc);
+	}
+      }
+    }
+  }
+
+  /* send dofs for ovl/int/ovl elements */
+  pcr_buffer_pack_int(buffer_id, 1, &sub_elem_ind[4]);
+  
+  for(iel=1;iel<=max_el_id;iel++){
+    if(sub_ind_elem[iel]==4){
+      nel=iel; 
+#ifdef DEBUG
+      if(ovl_ind_elem[nel]<=0){
+	printf("not overlap element %d to send DOFS in send_elem!\n",
+	       nel, ovl_ind_elem[nel]);
+	exit(-1);
+      }     
+#endif
+      iaux = mesh_ovl_p->l_elem_ovl_ali[Recp_id-1][ovl_ind_elem[nel]-1];
+      pcr_buffer_pack_int(buffer_id, 1, &iaux);
+
+      /* for active elements send dofs */
+      if(mmr_el_status(Mesh_id,nel)==MMC_ACTIVE){
+	pdeg=apr_get_ent_pdeg(Field_id,APC_ELEMENT,nel);
+	pcr_buffer_pack_int(buffer_id, 1, &pdeg);
+	nr_sol=apr_get_nr_sol(Field_id);
+	num_dofs=apr_get_nreq(Field_id)*apr_get_pdeg_nrdofs(Field_id,pdeg);
+	sol_vec_id=1;
+	apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+	pcr_buffer_pack_double(buffer_id, num_dofs, dofs_loc);
+/*kbw
+	printf("sending elem %d, pdeg %d, num_dofs %d, dofs:\n",
+	       nel, pdeg, num_dofs);
+	for(i=0;i<num_dofs;i++) printf("%lf  ", dofs_loc[i]);
+	printf("\n");
+/*kew*/
+	if(nr_sol>1){
+	  sol_vec_id=2;
+	  apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+	  pcr_buffer_pack_double(buffer_id, num_dofs, dofs_loc);
+	}
+	if(nr_sol>2){
+	  sol_vec_id=3;
+	  apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+	  pcr_buffer_pack_double(buffer_id, num_dofs, dofs_loc);
+	}
+      }
+    }
+  }
+
+
+
+
+  pcr_buffer_send(buffer_id, Recp_id);
+
+
+  /* inform all subdomains containing entity on the new owners !!!!!!!!!!! */
+
+  /* FREE SPACE !!!!!!!!!!!!!!!!!!!!!!!!!!! */
+  free(sub_ind_elem);
+  free(sub_ind_face);
+  free(sub_ind_edge);
+  free(sub_ind_vert);
+  
+  free(ovl_ind_elem);
+  free(ovl_ind_face);
+  free(ovl_ind_edge);
+  free(ovl_ind_vert);
+  
+  free(list_el_ext);
+  free(list_fa_ext);
+  free(list_ed_ext);
+  free(list_ve_ext); 
+
+  return(1);
+}
+
+/*---------------------------------------------------------
+  ddr_recv_elems - to receive an element with all its neighbors required 
+                  by overlap and all constitutive entities (faces, edges, etc.)
+---------------------------------------------------------*/
+int ddr_recv_elems(
+  int Field_id,       /* field_id */
+  int Mesh_id,        /* in: mesh ID */
+  int Nr_elem_rcv,       /* in: number of elements to be received */
+  int Send_id         /* in: sending processor ID */
+  )
+{
+
+  int buffer_id;
+  int el_faces[MMC_MAXELFAC+1]; /* element faces */
+  int el_nodes[MMC_MAXELVNO+1];
+  int i, iel, nel, iaux, ipid, elem_struct[20];
+  int ifa, nfa, face_ngb[2], num_faces, neig1, neig2;
+  int ied, ned, num_edges, fa_edges[4], face_struct[14];
+  int ino, nno, edge_vert[2], edge_struct[4];
+  int *ve_ids, *ed_ids, *fa_ids, *el_ids;
+  int *neig_buf, *fam_buf, num_sons, ison, son, son1, son2;
+  /* numbers of received entities of different kinds */
+  int nr_vert[8], nr_edge[8], nr_face[8], nr_elem[8]; 
+  int pdeg, nr_sol, num_dofs, sol_vec_id;
+  double dofs_loc[APC_MAXELSD];
+  double ve_coor[3];
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+
+  /* receive external vertices */
+  //  buffer_id = PCC_SND_EL_1;
+  buffer_id = 5566;
+  pcr_buffer_receive(buffer_id, Send_id);
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_vert[1]);
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_vert[3]);
+  /* allocate space for new IDs */
+  ve_ids = (int *)malloc((nr_vert[1]+nr_vert[3])*sizeof(int));
+  for(ino=0;ino<nr_vert[1];ino++){
+    pcr_buffer_unpack_double(buffer_id, 3, ve_coor);
+    iaux=0;
+    ve_ids[ino]=mmr_create_node(Mesh_id,ve_coor[0],ve_coor[1],ve_coor[2],iaux);
+/*kbw
+  printf("created vertex %d: local_id %d, IPID %d, coor %.3lf, %.3lf, %.3lf\n",
+	 ino, ve_ids[ino], ve_ids[ino]*MMC_MAX_NUM_SUB + ddv_my_proc_id,
+	 ve_coor[0], ve_coor[1], ve_coor[2]);
+/*kew*/
+  }
+  for(ino=nr_vert[1];ino<nr_vert[1]+nr_vert[3];ino++){
+    pcr_buffer_unpack_int(buffer_id, 1, &iaux);
+    iaux = iaux*MMC_MAX_NUM_SUB + Send_id;
+    pcr_buffer_unpack_double(buffer_id, 3, ve_coor);
+    ve_ids[ino]=mmr_create_node(Mesh_id,ve_coor[0],ve_coor[1],ve_coor[2],iaux);
+/*kbw
+  printf("created vertex %d: local ID %d, IPID %d, coor %.3lf, %.3lf, %.3lf\n",
+	 ino, ve_ids[ino], iaux, ve_coor[0], ve_coor[1], ve_coor[2]);
+/*kew*/
+  }
+  pcr_recv_buffer_close(buffer_id);
+
+/*kbw
+  printf("\nreceived %d vertex structures from processor\n\n",
+	 nr_vert[1]+nr_vert[3], Send_id);
+/*kew*/
+
+  /* receive external edges */
+  //  buffer_id = PCC_SND_EL_3;
+  buffer_id = 5576;
+  pcr_buffer_receive(buffer_id, Send_id);
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_edge[1]);
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_edge[3]);
+  /* allocate space for new IDs */
+  ed_ids = (int *)malloc((nr_edge[1]+nr_edge[3])*sizeof(int));
+  /* allocate space for family data */
+  fam_buf = (int *)malloc(2*(nr_edge[1]+nr_edge[3])*sizeof(int));
+  for(ied=0;ied<nr_edge[1]+nr_edge[3];ied++){
+    if(ied<nr_edge[1]){
+      pcr_buffer_unpack_int(buffer_id, 3, edge_struct);
+/*kbw
+  printf("receiving edge %d: type %d\n",
+	 ied, edge_struct[0]);
+/*kew*/
+    }
+    else{
+      pcr_buffer_unpack_int(buffer_id, 4, edge_struct);
+/*kbw
+  printf("receiving edge %d: type %d, IPID %d\n",
+	 ied, edge_struct[0], edge_struct[3]*MMC_MAX_NUM_SUB + Send_id);
+/*kew*/
+    }
+    /* if edge active and stores its nodes */
+    if(edge_struct[0]>0){
+      for(ino=1;ino<=2;ino++){
+	nno = edge_struct[ino];
+	if(nno<=0){
+	  edge_struct[ino]=ve_ids[-nno];
+/*kbw
+	  mmr_node_coor(Mesh_id, edge_struct[ino], ve_coor);
+	  if(-nno>=nr_vert[1]){
+	    i=mmr_ve_ipid(Mesh_id,edge_struct[ino]);
+	    printf("\tnode%d, IPID %d, rcp ext, send pos %d, coor: %.3lf, %.3lf, %.3lf\n",
+		   ino, i, -nno, 
+		   ve_coor[0], ve_coor[1], ve_coor[2]);
+	  }
+	  else{
+	    printf("\tnode%d, rcp ext, send pos %d, coor: %.3lf, %.3lf, %.3lf\n",
+		   ino, -nno, 
+		   ve_coor[0], ve_coor[1], ve_coor[2]);
+	  }
+/*kew*/
+	}
+	else{
+/*kbw
+	  mmr_node_coor(Mesh_id, nno, ve_coor);
+	  i=mmr_ve_ipid(Mesh_id,edge_struct[ino]);
+	  if(i==0) i=edge_struct[ino]*MMC_MAX_NUM_SUB + ddv_my_proc_id;
+	  printf("\tnode%d, IPID %d, already here, id %d, coor: %.3lf, %.3lf, %.3lf\n",
+		 ino, i, nno, ve_coor[0], ve_coor[1], ve_coor[2]);
+/*kew*/
+	}
+      }
+    }
+    else if(edge_struct[0]<0){
+      for(ino=1;ino<=2;ino++){
+	nno = edge_struct[ino];
+	fam_buf[2*ied+ino-1] = nno;
+	if(nno<=0){
+	  edge_struct[ino]=0;
+/*kbw
+	  if(-nno>=nr_edge[1]){
+	    i=mmr_ed_ipid(Mesh_id,edge_struct[ino]);
+	    printf("\tson%d, IPID %d, rcp ext, send pos %d\n",
+		   ino, i, nno);
+	  }
+	  else{
+	    printf("\tson%d, rcp ext, send pos %d\n",
+		   ino, nno);
+	  }
+/*kew*/
+	}
+	else{
+/*kbw
+	  i=mmr_ed_ipid(Mesh_id,edge_struct[ino]);
+	  printf("\tson%d, IPID %d, already here, id %d\n",
+		 ino, i, edge_struct[ino]);
+/*kew*/
+
+	}
+      }
+    }
+    if(ied<nr_edge[1]) {
+      edge_struct[3]=0;
+    }
+    else{
+      edge_struct[3]=edge_struct[3]*MMC_MAX_NUM_SUB + Send_id;
+    }
+
+    ed_ids[ied]=mmr_create_edge(Mesh_id, edge_struct[0], edge_struct[1], 
+		      edge_struct[2], edge_struct[3]); 
+
+/*kbw
+    printf("edge %d, local ID %d, IPID %d\n", 
+	   ied, ed_ids[ied],
+	   mmr_ed_ipid(Mesh_id, ed_ids[ied]));
+/*kew*/
+
+  }
+  pcr_recv_buffer_close(buffer_id);
+
+  /* set family data */
+  for(ied=0;ied<nr_edge[1]+nr_edge[3];ied++){
+    ned = ed_ids[ied];
+    if(mmr_edge_status(Mesh_id, ned)==MMC_INACTIVE){
+      if(fam_buf[2*ied]<=0){
+	son1 = ed_ids[-fam_buf[2*ied]];
+      }
+      else son1=0;
+      if(fam_buf[2*ied+1]<=0){
+	son2 = ed_ids[-fam_buf[2*ied+1]];
+      }
+      else son2=0;
+      mmr_set_edge_fam(Mesh_id, ned, son1, son2);
+
+/*kbw
+      if(ied<nr_edge[1]){
+	printf("setting family for %dth edge %d: sons %d, %d, new IPIDS !!!\n",
+	       ied, ned, son1, son2);
+      }
+      else{
+	i=mmr_ed_ipid(Mesh_id, ned);
+	printf("setting family for edge %d, IPID %d: ",
+	       ied, i);
+	if(son1>0){
+	  i=mmr_ed_ipid(Mesh_id, son1);
+	  printf("son1, IPID %d, ", i);
+	}
+	if(son2>0){
+	  i=mmr_ed_ipid(Mesh_id, son2);
+	  if(i==0) i=son2*MMC_MAX_NUM_SUB + ddv_my_proc_id;
+	  printf("son2, IPID %d\n", i);
+	}
+      }
+/*kew*/
+
+    }
+  }
+
+  /* free buffer for family data for edges */
+  free(fam_buf);
+
+/*kbw
+  printf("\nreceived %d edge structures from processor\n\n",
+	 nr_edge[1]+nr_edge[3], Send_id);
+/*kew*/
+
+
+  /* receive external faces */
+  //  buffer_id = PCC_SND_EL_4;
+  buffer_id = 5586;
+  pcr_buffer_receive(buffer_id, Send_id);
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_face[1]);
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_face[3]);
+  /* allocate space for new IDs */
+  fa_ids = (int *)malloc((nr_face[1]+nr_face[3])*sizeof(int));
+  /* allocate space for neighbors and family data */
+  neig_buf = (int *)malloc(2*(nr_face[1]+nr_face[3])*sizeof(int));
+  /*kb!!! assumed isotropic refinement */
+  num_sons=4;
+  fam_buf = (int *)malloc(num_sons*(nr_face[1]+nr_face[3])*sizeof(int));
+
+  for(ifa=0;ifa<nr_face[1]+nr_face[3];ifa++){
+
+    pcr_buffer_unpack_int(buffer_id, 10, face_struct);
+
+/*kbw
+    if(ifa<nr_face[1]){
+      printf("receiving face %d: type %d, bc %d\n",
+	     ifa, face_struct[0], face_struct[2]);
+    }
+    else{
+      printf("receiving face %d: IPID %d, type %d, bc %d\n",
+	     ifa, face_struct[1]*MMC_MAX_NUM_SUB + Send_id, 
+	     face_struct[0], face_struct[2]);
+    }
+/*kew*/
+    
+    if(abs(face_struct[0])==MMC_QUAD) num_edges=4;
+    else if(abs(face_struct[0])==MMC_TRIA) num_edges=3;
+    for(ied=0;ied<num_edges;ied++){
+      
+      ned=face_struct[3+ied];
+      
+      if(ned<=0){
+	
+	face_struct[3+ied] = ed_ids[-ned];
+
+/*kbw
+	{
+	  int ipid,sign=1;
+	  double coor1[3],coor2[3];
+	  if(face_struct[9]%10==0){
+	    sign = -1;
+	  }
+	  mmr_edge_nodes(Mesh_id, face_struct[3+ied], edge_vert);
+	  mmr_node_coor(Mesh_id, edge_vert[0], coor1);
+	  mmr_node_coor(Mesh_id, edge_vert[1], coor2);
+	  if(-ned>=nr_edge[1]){
+	    ipid=mmr_ed_ipid(Mesh_id, face_struct[3+ied]);
+	    printf("\tedge%d, IPID %d, rcp ext, sent_pos %d, center %.3lf %.3lf %.3lf\n",
+		   ied, sign*ipid,
+		   ned, (coor1[0]+coor2[0])/2,
+		   (coor1[1]+coor2[1])/2, (coor1[2]+coor2[2])/2
+		   );
+	  }
+	  else{
+	    printf("\tedge%d, sign %d, rcp ext, sent_pos %d, center %.3lf %.3lf %.3lf\n",
+		   ied, sign,
+		   ned, (coor1[0]+coor2[0])/2,
+		   (coor1[1]+coor2[1])/2, (coor1[2]+coor2[2])/2
+		   );
+	  }
+	}
+/*kew*/
+
+      }
+      else {
+
+
+/*kbw
+	{
+	  int ipid,sign=1;
+	  double coor1[3],coor2[3];
+	  if(face_struct[9]%10==0){
+	    sign = -1;
+	  }
+	  mmr_edge_nodes(Mesh_id, face_struct[3+ied], edge_vert);
+	  mmr_node_coor(Mesh_id, edge_vert[0], coor1);
+	  mmr_node_coor(Mesh_id, edge_vert[1], coor2);
+	  if(-ned>=nr_edge[1]){
+	    ipid=mmr_ed_ipid(Mesh_id, face_struct[3+ied]);
+	    printf("\tedge%d, IPID %d, already here, id %d, center %.3lf %.3lf %.3lf\n",
+		   ied, sign*ipid,
+		   sign*face_struct[3+ied], (coor1[0]+coor2[0])/2,
+		   (coor1[1]+coor2[1])/2, (coor1[2]+coor2[2])/2
+		   );
+	  }
+	  else{
+	    printf("\tedge%d, already here, id %d, center %.3lf %.3lf %.3lf\n",
+		   ied,
+		   sign*face_struct[3+ied], (coor1[0]+coor2[0])/2,
+		   (coor1[1]+coor2[1])/2, (coor1[2]+coor2[2])/2
+		   );
+	  }
+	}
+/*kew*/
+
+
+      } /* end if edge already here */
+
+      if(face_struct[9]%10==0){
+	face_struct[3+ied] *= -1;
+      }
+      face_struct[9] /= 10;
+    
+    } /* end loop over face adges */
+
+    /* decode neighbors numbers */
+    for(iel=0;iel<2;iel++){
+
+      neig_buf[2*ifa+iel]=face_struct[7+iel];
+
+/*kbw
+#ifdef DEBUG
+      if(ifa>0){
+	nel=face_struct[7+iel];
+	if(nel<-2){
+	  face_struct[7+iel] = 0;
+	  {
+	    printf("\tneig%d, rcp ext, sent_pos %d\n", 
+		   iel, nel+3 );
+	  }
+	}
+	else{
+	  if(nel>0){
+	    double node_coor[3*MMC_MAXELVNO]; 
+	    ipid = mmr_el_ipid(Mesh_id, nel);
+	    mmr_el_node_coor(Mesh_id, nel, NULL, node_coor);
+	    printf("\tneig%d, IPID %d, rcp here, id %d, center: %.3lf %.3lf %.3lf\n", 
+		   iel, ipid,
+		   face_struct[7+iel],
+		   (node_coor[3*0]+node_coor[3*1]+node_coor[3*2]+
+		    node_coor[3*3]+node_coor[3*4]+node_coor[3*5])/6,
+		   (node_coor[3*0+1]+node_coor[3*1+1]+node_coor[3*2+1]+
+		    node_coor[3*3+1]+node_coor[3*4+1]+node_coor[3*5+1])/6,
+		   (node_coor[3*0+2]+node_coor[3*1+2]+node_coor[3*2+2]+
+		    node_coor[3*3+2]+node_coor[3*4+2]+node_coor[3*5+2])/6
+		   );
+	  }
+	  else{
+	    printf("\tneig%d, big neig or boundary %d\n", iel, nel);
+	  }
+	}
+      }
+#endif
+/*kew*/
+
+    }
+
+    if(ifa<nr_face[1]) {
+      face_struct[1]=0;
+    }
+    else{
+      face_struct[1]=face_struct[1]*MMC_MAX_NUM_SUB + Send_id;
+    }
+
+    fa_ids[ifa] = mmr_create_face(Mesh_id, face_struct[0], face_struct[2],
+				  &face_struct[3], NULL, NULL, face_struct[1]);
+
+/*kbw
+    printf("face %d, local ID %d\n", ifa, fa_ids[ifa]);
+/*kew*/
+
+    /* if face refined and stores its sons' IDs */
+    if(face_struct[0]<0){
+
+      pcr_buffer_unpack_int(buffer_id, 4, &face_struct[10]);
+
+      /* loop over sons */
+      for(ison=0;ison<num_sons;ison++){
+	son=face_struct[10+ison];
+	fam_buf[4*ifa+ison] = son;
+
+	if(son<=0){
+
+	  face_struct[10+ison] = 0;
+
+	}
+#ifdef DEBUG
+	else{
+	  printf("sent not external face in send elems\n", son);
+	  exit(-1);
+	}
+#endif
+
+
+/*kbw
+	printf("\tson%d, rcp ext, pos send %d\n", 
+	       ison, son);
+/*kew*/
+
+      } /* end loop over sons */
+
+    } /* end  if face refined and stores its sons' IDs */
+
+
+
+  } /* end loop over received faces */
+
+  pcr_recv_buffer_close(buffer_id);
+
+
+  /* set family data */
+  for(ifa=0;ifa<nr_face[1]+nr_face[3];ifa++){
+
+    nfa = fa_ids[ifa];
+    if(mmr_fa_status(Mesh_id, nfa)==MMC_INACTIVE){
+
+/*kbw
+      if(nfa>0){
+	if(ifa<nr_face[1]){
+	  printf("setting family for face %d, id %d:\n",
+		 ifa, nfa );
+	}
+	else{
+	  i=mmr_fa_ipid(Mesh_id, nfa);
+	  printf("setting family for face %d, id %d, IPID %d: \n",
+		 ifa, nfa, i);
+	}
+      }
+/*kew*/
+
+      /* loop over sons */
+      for(ison=0;ison<num_sons;ison++){
+
+#ifdef DEBUG
+	if(fam_buf[4*ifa+ison]>0) {
+	  printf("sent not external face in send elems\n", son);
+	  exit(-1);
+	  fam_buf[4*ifa+ison]=0;
+	}
+#endif
+
+/*kbw
+      if(ifa<nr_face[1]){
+	printf("\tson%d, id %d, new IPID, pos_send %d\n", 
+	       ison, fa_ids[-fam_buf[4*ifa+ison]], fam_buf[4*ifa+ison] );
+      }
+      else{
+	i=mmr_fa_ipid(Mesh_id, fa_ids[-fam_buf[4*ifa+ison]]);
+	printf("\tson%d, id %d, IPID %d, pos_send %d\n", 
+	       ison, fa_ids[-fam_buf[4*ifa+ison]], i, fam_buf[4*ifa+ison] );
+      }
+/*kew*/
+
+	fam_buf[4*ifa+ison]=fa_ids[-fam_buf[4*ifa+ison]];
+	
+      }
+      mmr_set_face_fam(Mesh_id, nfa, &fam_buf[4*ifa]);
+
+
+    } /* end if face inactive */
+  } /* end loop over faces */
+
+  free(fam_buf);
+
+  /* receive external elements */
+  //  buffer_id = PCC_SND_EL_5;
+  buffer_id = 5596;
+
+  pcr_buffer_receive(buffer_id, Send_id);
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_elem[1]);
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_elem[3]);
+  /* allocate space for new IDs */
+  el_ids = (int *)malloc((nr_elem[1]+nr_elem[3])*sizeof(int));
+  /* allocate space for family data */
+  /*kb!!! assumed isotropic refinement */
+  num_sons=8;
+  fam_buf = (int *)malloc((num_sons+1)*(nr_elem[1]+nr_elem[3])*sizeof(int));
+
+  for(iel=0;iel<nr_elem[1]+nr_elem[3];iel++){
+  
+    pcr_buffer_unpack_int(buffer_id, 12, elem_struct);
+
+    fam_buf[(num_sons+1)*iel] = elem_struct[3];
+
+/*kbw
+    if(iel<nr_elem[1]){
+      printf("receiving elem %d: type %d, fath %d, refi %d\n",
+	     iel, elem_struct[0], 
+	     elem_struct[3], elem_struct[4]);
+    }
+    else {
+      printf("receiving elem %d: IPID %d, type %d, fath %d, refi %d\n",
+	     iel, elem_struct[1]*MMC_MAX_NUM_SUB + Send_id, 
+	     elem_struct[0], 
+	     elem_struct[3], elem_struct[4]);
+    }
+/*kew*/
+
+    /* decode face IDs */ 
+    if(abs(elem_struct[0])==MMC_PRISM) num_faces=5;
+    else if(abs(elem_struct[0])==MMC_BRICK) num_faces=6;
+    else if(abs(elem_struct[0])==MMC_TETRA) num_faces=4;
+
+    for(ifa=0;ifa<num_faces;ifa++) {
+
+      nfa = elem_struct[5+ifa];
+
+      if(nfa<=0){
+	elem_struct[5+ifa]=fa_ids[-nfa];
+	el_faces[ifa]=0;
+      }
+      else{
+	el_faces[ifa]=nfa;
+      }
+
+      if(elem_struct[11]%10==0){
+	elem_struct[5+ifa] *= -1;
+      }
+      elem_struct[11] /= 10;
+
+/*kbw
+      if(elem_struct[5+ifa]>0){
+	if(nfa<=0){
+	  if(-nfa<nr_face[1]){
+	    printf("\tface%d, rcp ext, send pos %d, id %d\n",
+		   ifa, nfa, elem_struct[5+ifa]);
+	  }
+	  else {
+	    printf("\tface%d, IPID %d, rcp ext, send pos %d, id %d\n",
+		   ifa, mmr_fa_ipid(Mesh_id, abs(elem_struct[5+ifa])),
+		   nfa, elem_struct[5+ifa]);
+	  }
+	}
+	else{
+	  printf("\tface%d, IPID %d, rcp ovl, id %d\n",
+		 ifa, mmr_fa_ipid(Mesh_id, abs(elem_struct[5+ifa])),
+		 elem_struct[5+ifa]);
+	}
+      }
+/*kew*/
+
+    } /* end loop over element faces */
+
+    if(iel<nr_elem[1]) {
+      elem_struct[1]=0;
+    }
+    else{
+      elem_struct[1]=elem_struct[1]*MMC_MAX_NUM_SUB + Send_id;
+    }
+
+    el_ids[iel]=mmr_create_element(Mesh_id, elem_struct[0], elem_struct[2],
+				   elem_struct[3], elem_struct[4],
+				   &elem_struct[5], NULL, elem_struct[1]);
+
+
+/*kbw
+    printf("elem %d, local ID %d\n", iel, el_ids[iel]);
+/*kew*/
+
+    for(ifa=0;ifa<num_faces;ifa++) {
+
+      nfa = el_faces[ifa];
+
+      if(nfa>0){
+	/*check whether element existed as face neighbor */
+	if(mmr_fa_sub_bnd(Mesh_id,nfa)){
+	  int fa_neig[2];
+	  mmr_fa_eq_neig(Mesh_id, nfa, fa_neig, NULL, NULL);
+	  if(fa_neig[0]==MMC_SUB_BND){
+	    mmr_set_face_neig(Mesh_id, nfa, el_ids[iel], 0);
+	  }
+	  else if(fa_neig[1]==MMC_SUB_BND){
+	    mmr_set_face_neig(Mesh_id, nfa, 0, el_ids[iel]);
+	  }
+#ifdef DEBUG
+	  else{
+	    printf ("bzdura neighbor for face %d !!!\n",nfa);
+	    exit(-1);
+	  }
+#endif
+
+/*kbw
+	  printf("face%d, rcp ovl, id %d - sub_bnd changed to neig %d\n",
+		 ifa, nfa, el_ids[iel]);
+/*kew*/
+	}
+      }
+    }
+
+    /* if elem refined and stores its nodes */				   
+    if(elem_struct[0]<0){
+
+      pcr_buffer_unpack_int(buffer_id, num_sons, &elem_struct[12]);
+
+      /* loop over sons */
+      for(ison=0;ison<num_sons;ison++){
+	son=elem_struct[12+ison];
+	fam_buf[(num_sons+1)*iel+1+ison] = son;
+	if(son<=0){
+	  elem_struct[12+ison] = 0;
+	}
+/*kbw
+	printf("\tson%d, rcp ext, pos send %d\n", 
+	       ison, son);
+/*kew*/
+      } /* end loop over sons */
+
+    } /* end if elem refined and stores its nodes */				   
+    /*  for active elements receive dofs */
+    if(elem_struct[0]>0){
+      nel = el_ids[iel];
+      pcr_buffer_unpack_int(buffer_id, 1, &pdeg);
+      apr_set_ent_pdeg(Field_id,APC_ELEMENT,nel, pdeg);
+      nr_sol=apr_get_nr_sol(Field_id);
+      num_dofs=apr_get_nreq(Field_id)*apr_get_pdeg_nrdofs(Field_id,pdeg);
+      sol_vec_id=1;
+      pcr_buffer_unpack_double(buffer_id, num_dofs, dofs_loc);
+      apr_create_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+
+/*kbw
+      apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+	printf("\treceived elem %d, pdeg %d, num_dofs %d, dofs:\n\t",
+	       nel, pdeg, num_dofs);
+	for(i=0;i<num_dofs;i++) printf("%lf  ", dofs_loc[i]);
+	printf("\n");
+/*kew*/
+
+      if(nr_sol>1){
+	sol_vec_id=2;
+	pcr_buffer_unpack_double(buffer_id, num_dofs, dofs_loc);
+	apr_create_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+      }
+      if(nr_sol>2){
+	sol_vec_id=3;
+	pcr_buffer_unpack_double(buffer_id, num_dofs, dofs_loc);
+	apr_create_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+      }
+    }
+
+  } /* end loop over received elems */
+
+  pcr_recv_buffer_close(buffer_id);
+
+  /* set family data */
+  for(iel=0;iel<nr_elem[1]+nr_elem[3];iel++){
+    
+    nel = el_ids[iel];
+
+/*kbw
+    if(fam_buf[(num_sons+1)*iel]<0){
+      if(iel<nr_elem[1]){
+	printf("setting family data for elem %d, id %d, fath: pos %d, id %d\n", 
+	       iel, nel, fam_buf[(num_sons+1)*iel]+1,
+	       el_ids[-fam_buf[(num_sons+1)*iel]-1]);
+      }
+      else{
+	printf("family for elem %d, ID %d, IPID %d, fath: pos %d, ID %D, IPID %d\n", 
+	       iel, nel, mmr_el_ipid(Mesh_id, nel), fam_buf[(num_sons+1)*iel]+1,
+	       el_ids[-fam_buf[(num_sons+1)*iel]-1],
+	       mmr_el_ipid(Mesh_id, el_ids[-fam_buf[(num_sons+1)*iel]-1]));
+      }
+    }
+    else{
+      if(iel<nr_elem[1]){
+	printf("setting family data for elem %d, id %d, no fath %d\n", 
+	       iel, nel, fam_buf[(num_sons+1)*iel]+1);
+      }
+      else{
+	printf("setting family data for elem %d, ID %d, IPID %d, no fath %d\n", 
+	       iel, nel, mmr_el_ipid(Mesh_id, nel), fam_buf[(num_sons+1)*iel]);
+      }
+    }
+/*kew*/
+
+    if(fam_buf[(num_sons+1)*iel]<0){
+
+      fam_buf[(num_sons+1)*iel] = el_ids[-fam_buf[(num_sons+1)*iel]-1];
+
+    }
+#ifdef DEBUG
+    else if(fam_buf[(num_sons+1)*iel]>0){
+      printf("int or ovl fahter for sent element %d in send elems\n", iel);
+      exit(-1);
+    }
+#endif
+
+
+    if(mmr_el_status(Mesh_id, nel)==MMC_INACTIVE){
+      
+      /* loop over father and sons */
+      for(ison=1;ison<num_sons+1;ison++){
+
+/*kbw
+	if(-fam_buf[(num_sons+1)*iel+ison]<nr_elem[1]){
+	  printf("\tson%d, pos send %d, new id %d\n", 
+		 ison, fam_buf[(num_sons+1)*iel+ison],
+		 el_ids[-fam_buf[(num_sons+1)*iel+ison]]);
+	}
+	else{
+	  printf("\tson%d, IPID %d, pos send %d\n", 
+		 ison,
+		 mmr_el_ipid(Mesh_id, el_ids[-fam_buf[(num_sons+1)*iel+ison]]),
+		 fam_buf[(num_sons+1)*iel+ison]);
+	}
+/*kew*/
+
+#ifdef DEBUG
+	if(fam_buf[(num_sons+1)*iel+ison]>0){
+	  printf("received not external element in send elems\n", son);
+	  exit(-1);
+	  fam_buf[(num_sons+1)*iel+ison] = 0;
+	}
+#endif
+
+
+	fam_buf[(num_sons+1)*iel+ison] = 
+	                             el_ids[-fam_buf[(num_sons+1)*iel+ison]];
+
+      }
+
+      mmr_set_elem_fam(Mesh_id, nel, fam_buf[(num_sons+1)*iel], 
+		       &fam_buf[(num_sons+1)*iel+1]);
+
+    }
+    else{
+
+      mmr_set_elem_fath(Mesh_id, nel, fam_buf[(num_sons+1)*iel]);
+
+    }
+
+
+/*kbw
+    if(nel==575){
+      int fam_test[100], fathio;
+      fathio = mmr_el_fam(Mesh_id, nel, fam_test, NULL);
+      printf("test elem %d, father %d\n\t", nel, fathio);
+      if(mmr_el_status(Mesh_id, nel)==MMC_INACTIVE){
+	for(ison=1;ison<=fam_test[0];ison++){
+	  printf("son%d, new id %d", 
+		 ison, fam_test[ison]);
+	}
+	printf("\n");
+      }
+    }
+/*kew*/
+
+
+  }
+
+  /* set neighbors for faces */
+  for(ifa=0;ifa<nr_face[1]+nr_face[3];ifa++){
+    nfa=fa_ids[ifa];
+/*kbw
+    if(nfa>0){
+      printf("face %d, id %d\n", ifa, nfa);
+    }
+/*kew*/
+    if(neig_buf[2*ifa]<-2){
+      /* de-shift */
+      neig1=el_ids[-(neig_buf[2*ifa]+3)];
+/*kbw
+      if(nfa>0){
+	double node_coor[3*MMC_MAXELVNO]; 
+	mmr_el_node_coor(Mesh_id, neig1, NULL, node_coor);
+	printf("neig1 %d, pos %d, center: %.3lf %.3lf %.3lf\n", 
+	   neig1, neig_buf[2*ifa]+3,
+		   (node_coor[3*0]+node_coor[3*1]+node_coor[3*2]+
+		    node_coor[3*3]+node_coor[3*4]+node_coor[3*5])/6,
+		   (node_coor[3*0+1]+node_coor[3*1+1]+node_coor[3*2+1]+
+		    node_coor[3*3+1]+node_coor[3*4+1]+node_coor[3*5+1])/6,
+		   (node_coor[3*0+2]+node_coor[3*1+2]+node_coor[3*2+2]+
+		    node_coor[3*3+2]+node_coor[3*4+2]+node_coor[3*5+2])/6 );
+      }
+/*kew*/
+
+    }
+    else {
+      neig1=neig_buf[2*ifa];
+/*kbw
+      if(nfa>0){
+	printf("big neig or boundary %d\n", neig1);
+      }
+/*kew*/
+    }
+    if(neig_buf[2*ifa+1]<-2){
+      neig2=el_ids[-(neig_buf[2*ifa+1]+3)];
+/*kbw
+      if(nfa>0){
+	double node_coor[3*MMC_MAXELVNO];  
+	mmr_el_node_coor(Mesh_id, neig2, NULL, node_coor);
+	printf("\tneig2 %d, pos %d, center: %.3lf %.3lf %.3lf\n", 
+	   neig2, neig_buf[2*ifa+1]+3,
+		   (node_coor[3*0]+node_coor[3*1]+node_coor[3*2]+
+		    node_coor[3*3]+node_coor[3*4]+node_coor[3*5])/6,
+		   (node_coor[3*0+1]+node_coor[3*1+1]+node_coor[3*2+1]+
+		    node_coor[3*3+1]+node_coor[3*4+1]+node_coor[3*5+1])/6,
+		   (node_coor[3*0+2]+node_coor[3*1+2]+node_coor[3*2+2]+
+		    node_coor[3*3+2]+node_coor[3*4+2]+node_coor[3*5+2])/6 );
+      }
+/*kew*/
+    }
+    else {
+      neig2=neig_buf[2*ifa+1];
+/*kbw
+      if(nfa>0){
+	printf("big neig or boundary %d\n", neig2);
+      }
+/*kew*/
+    }
+
+    mmr_set_face_neig(Mesh_id, nfa, neig1, neig2);
+  }
+
+  free(neig_buf);
+  free(fam_buf);
+
+  /* send back new IDs for owned entities */
+  //  buffer_id = PCC_SND_EL_2;
+  buffer_id = 5766;
+  pcr_send_buffer_open(buffer_id);
+  for(ino=0;ino<nr_vert[1];ino++){
+    pcr_buffer_pack_int(buffer_id, 1, &ve_ids[ino]);
+/*kbw
+  printf("sent new_id %d, IPID %d for %dth vertex\n",
+	 ve_ids[ino], ve_ids[ino]*MMC_MAX_NUM_SUB + ddv_my_proc_id, ino);
+/*kew*/
+  }
+  for(ied=0;ied<nr_edge[1];ied++){
+    pcr_buffer_pack_int(buffer_id, 1, &ed_ids[ied]);
+/*kbw
+  printf("edge %d, sent new_id %d, IPID %d\n",
+	 ied, ed_ids[ied], ed_ids[ied]*MMC_MAX_NUM_SUB + ddv_my_proc_id);
+/*kew*/
+  }
+  for(ifa=0;ifa<nr_face[1];ifa++){
+    pcr_buffer_pack_int(buffer_id, 1, &fa_ids[ifa]);
+/*kbw
+  printf("face %d, sent new_id %d, IPID %d\n",
+	 ifa, fa_ids[ifa], fa_ids[ifa]*MMC_MAX_NUM_SUB + ddv_my_proc_id);
+/*kew*/
+  }
+  for(iel=0;iel<nr_elem[1];iel++){
+    pcr_buffer_pack_int(buffer_id, 1, &el_ids[iel]);
+/*kbw
+  printf("elem %d, sent new_id %d, IPID %d\n",
+	 iel, el_ids[iel], el_ids[iel]*MMC_MAX_NUM_SUB + ddv_my_proc_id);
+/*kew*/
+  }
+  pcr_buffer_send(buffer_id, Send_id);
+
+/*kbw
+  printf("\nsent %d vertex, %d edge, %d face and %d elem IDs to processor %d\n\n",
+	 nr_vert[1], nr_edge[1], nr_face[1], nr_elem[1], Send_id);
+/*kew*/
+
+
+  /* receive IDs of entities to exchange IPIDS */
+  //  buffer_id = PCC_SND_EL_6;
+  buffer_id = 5597;
+  pcr_buffer_receive(buffer_id, Send_id);
+
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_vert[2]);
+  for(ino=0;ino<nr_vert[2];ino++){
+  
+    pcr_buffer_unpack_int(buffer_id, 1, &nno);
+
+#ifdef DEBUG
+    if(ddr_get_owner(Mesh_id,MMC_NODE,nno)!=Send_id){
+      printf("received vertex %d to change IPID from %d, not from owner %d\n",
+	     nno, Send_id, ddr_get_owner(Mesh_id,MMC_NODE,nno) );
+      exit(-1);
+    }
+#endif
+
+    mmr_ve_set_ipid(Mesh_id, nno, 0);
+
+/*kbw
+    printf("received vertex %d: local ID %d, setting new ipid %d\n", 
+	   ino, nno, nno*MMC_MAX_NUM_SUB + ddv_my_proc_id); 
+/*kew*/
+
+  }
+
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_edge[2]);
+  for(ied=0;ied<nr_edge[2];ied++){
+  
+    pcr_buffer_unpack_int(buffer_id, 1, &ned);
+
+#ifdef DEBUG
+    if(ddr_get_owner(Mesh_id,MMC_EDGE,ned)!=Send_id){
+      printf("received edge %d to change IPID from %d, not from owner %d\n",
+	     ned, Send_id, ddr_get_owner(Mesh_id,MMC_EDGE,ned) );
+      exit(-1);
+    }
+#endif
+
+    mmr_ed_set_ipid(Mesh_id, ned, 0);
+    pcr_buffer_unpack_int(buffer_id, 1, &iaux);
+
+/*kbw
+    {
+      int edge_struct[10];
+      mmr_edge_structure(Mesh_id, ned, edge_struct);
+      printf("received edge %d: local ID %d, new ipid %d, old type %d, new type %d\n", 
+	     ied, ned, ned*MMC_MAX_NUM_SUB + ddv_my_proc_id,
+	     edge_struct[0], iaux ); 
+    }
+/*kew*/
+
+    mmr_set_edge_type(Mesh_id, ned, iaux);
+
+
+  }
+
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_face[2]);
+  for(ifa=0;ifa<nr_face[2];ifa++){
+  
+    pcr_buffer_unpack_int(buffer_id, 1, &nfa);
+
+#ifdef DEBUG
+    if(ddr_get_owner(Mesh_id,MMC_FACE,nfa)!=Send_id){
+      printf("received face %d to change IPID from %d, not from owner %d\n",
+	     nfa, Send_id, ddr_get_owner(Mesh_id,MMC_FACE,nfa) );
+      exit(-1);
+    }
+#endif
+
+    mmr_fa_set_ipid(Mesh_id, nfa, 0);
+
+#ifdef DEBUG
+    if(mmr_fa_sub_bnd(Mesh_id, nfa)){
+      printf("received face %d to change IPID on sub_bnd\n",
+	     nfa );
+      exit(-1);
+    }
+#endif
+
+/*kbw
+    printf("received face %d: local ID %d, setting new ipid %d\n", 
+	   ifa, nfa, nfa*MMC_MAX_NUM_SUB + ddv_my_proc_id); 
+/*kew*/
+
+/*kb!!!*/
+    if(mmr_fa_sub_bnd(Mesh_id, nfa)){
+
+      pcr_buffer_unpack_int(buffer_id, 1, &iaux);
+
+      if(iaux<0){
+
+	pcr_buffer_unpack_int(buffer_id, 1, &i);
+
+/*ke!!!*/
+/*kbw
+	printf ("face %d, get neighbor%d, pos. %d, local ID %d\n",
+		nfa, i, iaux, el_ids[-(iaux+1)]);
+/*kew*/
+
+/*kb!!!*/
+	if(i==0){
+	  mmr_set_face_neig(Mesh_id, nfa, el_ids[-(iaux+1)], 0);
+	}
+	else if(i==1){
+	  mmr_set_face_neig(Mesh_id, nfa, 0, el_ids[-(iaux+1)]);
+	}
+#ifdef DEBUG
+	else{
+	  printf ("jakas bzdura sending neighbor for face %d !!!\n",nfa);
+	  exit(-1);
+	}
+#endif
+      }
+#ifdef DEBUG
+      else{
+	printf ("face %d, on int_sub_bnd need neighbor !!!\n",nfa);
+	exit(-1);
+      }
+#endif
+    }
+/*ke!!!*/
+  }
+ 
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_elem[2]);
+  for(iel=0;iel<nr_elem[2];iel++){
+  
+    pcr_buffer_unpack_int(buffer_id, 1, &nel);
+
+#ifdef DEBUG
+    if(ddr_get_owner(Mesh_id,MMC_ELEMENT,nel)!=Send_id){
+      printf("received element %d to change IPID from %d, not from owner %d\n",
+	     nel, Send_id, ddr_get_owner(Mesh_id,MMC_ELEMENT,nel) );
+      exit(-1);
+    }
+#endif
+
+    mmr_el_set_ipid(Mesh_id, nel, 0);
+
+/*kbw
+    printf("received element %d: local ID %d, setting new ipid %d\n", 
+	   iel, nel, nel*MMC_MAX_NUM_SUB + ddv_my_proc_id); 
+/*kew*/
+
+    /*  for active elements receive dofs */
+    if(mmr_el_status(Mesh_id,nel)==MMC_ACTIVE){
+      pcr_buffer_unpack_int(buffer_id, 1, &pdeg);
+      apr_set_ent_pdeg(Field_id,APC_ELEMENT,nel, pdeg);
+      nr_sol=apr_get_nr_sol(Field_id);
+      num_dofs=apr_get_nreq(Field_id)*apr_get_pdeg_nrdofs(Field_id,pdeg);
+      sol_vec_id=1;
+      pcr_buffer_unpack_double(buffer_id, num_dofs, dofs_loc);
+      apr_create_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+
+/*kbw
+      apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+      printf("\treceived elem %d, pdeg %d, num_dofs %d, dofs:\n\t",
+	     nel, pdeg, num_dofs);
+      for(i=0;i<num_dofs;i++) printf("%lf  ", dofs_loc[i]);
+      printf("\n");
+/*kew*/
+
+      if(nr_sol>1){
+	sol_vec_id=2;
+	pcr_buffer_unpack_double(buffer_id, num_dofs, dofs_loc);
+	apr_create_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+      }
+      if(nr_sol>2){
+	sol_vec_id=3;
+	pcr_buffer_unpack_double(buffer_id, num_dofs, dofs_loc);
+	apr_create_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+      }
+    }
+
+  }
+
+  /* receive dofs for ovl/int/ovl elements */
+  pcr_buffer_unpack_int(buffer_id, 1, &nr_elem[4]);
+  for(iel=0;iel<nr_elem[4];iel++){
+  
+    pcr_buffer_unpack_int(buffer_id, 1, &nel);
+
+#ifdef DEBUG
+    if(ddr_get_owner(Mesh_id,MMC_ELEMENT,nel)!=Send_id){
+      printf("received element %d to change IPID from %d, not from owner %d\n",
+	     nel, Send_id, ddr_get_owner(Mesh_id,MMC_ELEMENT,nel) );
+      exit(-1);
+    }
+#endif
+
+    /*  for active elements receive dofs */
+    if(mmr_el_status(Mesh_id,nel)==MMC_ACTIVE){
+      pcr_buffer_unpack_int(buffer_id, 1, &pdeg);
+      apr_set_ent_pdeg(Field_id,APC_ELEMENT,nel, pdeg);
+      nr_sol=apr_get_nr_sol(Field_id);
+      num_dofs=apr_get_nreq(Field_id)*apr_get_pdeg_nrdofs(Field_id,pdeg);
+      sol_vec_id=1;
+      pcr_buffer_unpack_double(buffer_id, num_dofs, dofs_loc);
+      apr_create_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+
+/*kbw
+      apr_read_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+      printf("\treceived elem %d, pdeg %d, num_dofs %d, dofs:\n\t",
+	     nel, pdeg, num_dofs);
+      for(i=0;i<num_dofs;i++) printf("%lf  ", dofs_loc[i]);
+      printf("\n");
+/*kew*/
+
+      if(nr_sol>1){
+	sol_vec_id=2;
+	pcr_buffer_unpack_double(buffer_id, num_dofs, dofs_loc);
+	apr_create_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+      }
+      if(nr_sol>2){
+	sol_vec_id=3;
+	pcr_buffer_unpack_double(buffer_id, num_dofs, dofs_loc);
+	apr_create_ent_dofs(Field_id,APC_ELEMENT,nel,num_dofs,sol_vec_id,dofs_loc);
+      }
+    }
+
+  }
+
+  pcr_recv_buffer_close(buffer_id);
+
+  /* FREE SPACE !!!!!!!!!!!!!!!!!!!!!!!!!!! */
+  free(ve_ids);
+  free(ed_ids);
+  free(fa_ids);
+  free(el_ids);
+
+  return(1);
+}
+
+/*---------------------------------------------------------
+  ddr_add_sons_subd - to add antecedents to subdoamin in a recursive manner
+---------------------------------------------------------*/
+int ddr_add_sons_subd(
+  int Mesh_id,   /* in: mesh ID */
+  int El_id,     /* in: father element */
+  int* List_ind, /* in: list of indicators */
+  int Ind        /* in: indicator to use for marking added elements */
+  )
+{
+
+  int ison, nel;
+  int elsons[MMC_MAXELSONS+1];
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+
+  mmr_el_fam(Mesh_id,El_id,elsons,NULL);
+
+  for(ison=1;ison<=elsons[0];ison++){
+
+    nel=elsons[ison];
+    if(List_ind[nel]==0) {
+
+      List_ind[nel]=Ind;
+
+      /* add grandsons */
+      ddr_add_sons_subd(Mesh_id, nel, List_ind, Ind);
+
+    }
+  }
+
+  return(1);
+}
+
+
+/*---------------------------------------------------------
+  ddr_add_fam_dofs - to sum up dofs of antecedents to total number of DOFs
+---------------------------------------------------------*/
+int ddr_add_fam_dofs(
+  int Field_id,        /* in: field ID */
+  int El_id,          /* in: local ID of an element to be sent */
+  int* Nr_dofs        /* in/out: number of dofs to be updated */
+  )
+{
+
+  int mesh_id, ison, nel;
+  int elsons[MMC_MAXELSONS+1];
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+
+  /* select corresponding mesh */
+  mesh_id = apr_get_mesh_id(Field_id);
+
+  mmr_el_fam(mesh_id,El_id,elsons,NULL);
+
+  for(ison=1;ison<=elsons[0];ison++){
+
+    nel=elsons[ison];
+
+    if(mmr_el_status(mesh_id, nel)==MMC_ACTIVE){
+      if(mmr_el_ipid(mesh_id,nel)==0){
+	*Nr_dofs += apr_get_ent_nrdof(Field_id, APC_ELEMENT, nel);
+      }
+    }
+    else{
+
+      ddr_add_fam_dofs(mesh_id, nel, Nr_dofs);
+      
+    }
+
+  }
+   
+  return(1);
+}
+
+/*---------------------------------------------------------
+  ddr_order_elems - to order elements for balancing 
+---------------------------------------------------------*/
+void ddr_order_elems(
+  int Mesh_id,        /* in: mesh ID */
+  int Nrelem,         /* in: number of elements on List_i and List_d */ 
+  int* List_el,       /* in/out: list of elements to be sorted */
+  double* List_pos    /* in/out: list of positions used for sorting */
+)
+{
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+  
+  sortz(Nrelem, List_el, List_pos);
+
+  return;
+}
+
+
+/*---------------------------------------------------------
+  sortz - to sort array of indices List_i according to the corresponding values
+          in double List_d (actually List_d is sorted in increasing order)
+	  ... taken from an old fortran book, sorry...
+---------------------------------------------------------*/
+void sortz(
+  int Nrelem,         /* in: number of elements on List_i and List_d */ 
+  int* List_i,        /* in/out: list of indices to be sorted */
+  double* List_d      /* in/out: list of values used for sorting */
+  )
+{
+
+  /* auxiliary list of indices */
+  int* List_aux;
+
+  int i, j, l, ir, index, index_i;
+  double q;
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+
+  List_aux = (int *)malloc((Nrelem+1)*sizeof(int));
+  for(i=1;i<=Nrelem;i++) List_aux[i]=i;
+
+  l=Nrelem/2+1;
+  ir=Nrelem;
+
+ l20: {}
+
+  if(l>1){
+    l--;
+    index=List_aux[l];
+    index_i=List_i[l];
+    q=List_d[index];
+  }
+  else{
+    index=List_aux[ir];
+    index_i=List_i[ir];
+    q=List_d[index];
+
+    List_aux[ir]=List_aux[1];
+    List_i[ir]=List_i[1];
+    ir--;
+
+
+    if(ir==1){
+      List_aux[1]=index;
+      List_i[1]=index_i;
+      goto the_end;
+    }
+
+  }
+
+  i=l;
+  j=l*2;
+
+ l30: {}
+
+  if(j>ir) goto l40;
+
+  if(j<ir && List_d[List_aux[j]] < List_d[List_aux[j+1]]) j++;
+
+  if(q<List_d[List_aux[j]]){
+    List_aux[i] = List_aux[j];
+    List_i[i] = List_i[j];
+    i=j;
+    j+=j;
+  }
+  else j=ir+1;
+
+  goto l30;
+
+ l40: {}
+
+  List_aux[i]=index;
+  List_i[i]=index_i;
+
+  goto l20;
+
+ the_end: {}
+
+  free(List_aux);
+
+  return;
+}

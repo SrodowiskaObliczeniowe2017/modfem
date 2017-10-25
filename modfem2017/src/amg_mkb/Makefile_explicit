@@ -1,0 +1,47 @@
+# Makefile for the adapter of the multi-level Krylow space solver
+
+$(MOD_FEM_OBJ_DIR)/lsl_mkb_lib.a: \
+	  $(MOD_FEM_OBJ_DIR)/lal_block_lib.a \
+	  lsh_mkb_intf.h $(MOD_FEM_OBJ_DIR)/lss_mkb_intf.o \
+	  lsh_mkb_fem_intf.h $(MOD_FEM_OBJ_DIR)/lss_mkb_fem_intf.o \
+	  $(MOD_FEM_OBJ_DIR)/it_mkb_core.o \
+	  $(MOD_FEM_OBJ_DIR)/it_gmres.o \
+	  $(MOD_FEM_OBJ_DIR)/it_mkb_util.o \
+	  include/it_mkb.h
+	$(AR) $@  $(MOD_FEM_OBJ_DIR)/lss_mkb_intf.o \
+          $(MOD_FEM_OBJ_DIR)/lss_mkb_fem_intf.o \
+	  $(MOD_FEM_OBJ_DIR)/it_mkb_core.o \
+	  $(MOD_FEM_OBJ_DIR)/it_gmres.o \
+	  $(MOD_FEM_OBJ_DIR)/it_mkb_util.o
+
+$(MOD_FEM_OBJ_DIR)/lal_block_lib.a: \
+	  $(MOD_FEM_OBJ_DIR)/las_block_intf.o \
+	  $(MOD_FEM_OBJ_DIR)/las_block_util.o \
+	  include/it_mkb.h include/lah_block.h
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/las_block_intf.o $(MOD_FEM_OBJ_DIR)/las_block_util.o 
+
+$(MOD_FEM_OBJ_DIR)/lss_mkb_intf.o: lss_mkb_intf.c lsh_mkb_intf.h include/it_mkb.h
+	$(CC) $(CFL) -c lss_mkb_intf.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/lss_mkb_fem_intf.o: lss_mkb_fem_intf.c \
+          lsh_mkb_intf.h lsh_mkb_fem_intf.h include/it_mkb.h
+	$(CC) $(CFL) -c lss_mkb_fem_intf.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/it_mkb_core.o : mkb/it_mkb_core.c include/it_mkb.h 
+	$(CC) $(CFL) -c mkb/it_mkb_core.c  -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/it_gmres.o : mkb/it_gmres.c include/it_mkb.h 
+	$(CC) $(CFL) -c mkb/it_gmres.c  -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/it_mkb_util.o : mkb/it_mkb_util.c include/it_mkb.h 
+	$(CC) $(CFL) -c mkb/it_mkb_util.c  -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/las_block_intf.o : lad_block/las_block_intf.c include/lah_block.h 
+	$(CC) $(CFL) -c lad_block/las_block_intf.c  -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/las_block_util.o : lad_block/las_block_util.c include/lah_block.h 
+	$(CC) $(CFL) -c lad_block/las_block_util.c  -o $@ $(INC)
+
+clean:
+	rm -f *~ *.o *.a
+

@@ -1,0 +1,35 @@
+#include<stdlib.h>
+#include<stdio.h>
+#include<string.h>
+
+int main(int argc, char **argv)
+{
+  
+  
+  char nas_filename[256];
+  char jk_filename[256]; 
+  
+  sprintf(nas_filename,"%s.nas",argv[1]);
+  sprintf(jk_filename,"%s.jk",argv[1]);
+  
+  FILE* nas_file = fopen(nas_filename,"r");
+
+  if(nas_file == NULL){
+    printf("\nCannot find input file %s \n", nas_filename);
+    exit(-1); 
+  }
+
+
+  do{
+    
+   fscanf(nas_file,"%8s\n",keyword);
+
+   printf("%s\n", keyword);
+   
+    
+    
+  } while(strncmp(keyword,"CQUAD4", 6) == 0 || 
+	  strncmp(keyword,"CPENTA", 6) == 0);
+
+  return(0);
+}

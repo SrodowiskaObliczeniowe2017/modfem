@@ -1,0 +1,31 @@
+# Comment lines start with '#'
+
+# Relative path to the fild.dmp file
+./field.dmp
+
+# Relative path to the comparison fild.dmp file
+./comparison/field.dmp
+
+# Relative path to the ctest directory
+../..
+
+# precision
+5
+
+# jump (1 -no jump)
+1
+
+# limit
+1e-8
+
+# H1 error (0 -no test)
+0.0066
+
+# L2 error (0 -no test)
+0.000062
+
+# ZZ error (0 -no test)
+0.0054
+
+# bin name
+#MOD_FEM_conv_diff_prism_std

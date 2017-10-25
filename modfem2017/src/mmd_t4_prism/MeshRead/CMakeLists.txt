@@ -1,0 +1,3 @@
+add_library(MeshRead MeshFileImporter 
+NasFileImporter AdinaDatImporter DmpFileImporter 
+KazFileImporter SimplePointReader)

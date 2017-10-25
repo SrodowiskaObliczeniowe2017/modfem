@@ -1,0 +1,13 @@
+set terminal X11
+set ylabel "Error"
+set xlabel "Number of degrees of freedom"
+set logscale y
+set logscale x
+set data style linespoints
+set output "diff_xyz_std_conv.eps"
+set title "Convergence for pure diffusion problem - prismatic elements, linear approximation"
+plot [5:300000][1e-5:0.3] "diff_xyz_std.h_conv" using 1:2 title "L2 norm of error", "diff_xyz_std.h_conv" using 1:3 title "H1 norm of error", "diff_xyz_std.h_conv" using 1:4 title "ZZ error estimate"
+
+set terminal postscript
+set output "diff_xyz_std_conv.eps"
+

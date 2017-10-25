@@ -1,0 +1,81 @@
+FINE_LEVEL       (the only level for single-level solvers)
+2 5 50    single/multi-level GMRES, number of levels, number of Krylov vectors
+2 2 4  		type of preconditioner,  number of internal sweeps,  block type
+500 0 1e-9   	max_iter, convergence type, convergence treshold
+3 1 1   	output level, number of: pre-smooth and  post-smooth sweeps
+
+COARSE_LEVEL	(the coarsest level solver)
+2 -1 100  	single/multi-level GMRES, coarse pdeg, number of Krylov vectors
+2 2 4  		type of preconditioner,  number of internal sweeps,  block type	
+100 1 1e-12   	max_iter, convergence type, convergence treshold
+0    		output level
+
+INTER_LEVELS	(smoothers/preconditioners for intermediate levels)
+1 1 -1          number of: pre-smooth and  post-smooth sweeps, pdeg coarse
+2 2 4   	type of preconditioner,  number of internal sweeps,  block type
+0    		output level   
+ 
+***************************************************************************
+
+FOR GS AND PRISMATIC ELEMENTS TRY BLOCKS IN ORDER: 2=6, 5, 4
+
+coarse_pdeg = -1 - use pdeg from fine level
+
+Options for GMRES solver (on fine level a,g,h,i,k can be overriden by fem code):
+a b c 	a-solver: 1-single level GMRES, 2-multi-level/multigrid GMRES
+	b-type: 0-standard, 1-matrix free (not present in this version of code)
+	c-number of Krylov vectors
+d e f	d-preconditioner (only at the current level): 
+		0-no, 1-block Jacobi, 2-block Gauss-Seidel (both as smoothers)
+		3-additive Schwarz (block Jacobi as preconditioner) 
+		4-ILU(0) (as smoother), 5-ILU(0) (as preconditioner)
+	e-number of internal sweeps for block Jacobi and block Gauss-Seidel
+	f-type of blocks (most useful options):
+		1-one-element blocks
+		2,4,5,6-larger blocks with overlap (for block smoothers)
+g h i	g-maximal number of single iterations (not restarts!)
+	h-convergence criterion for the norm of residual:
+		1-rel_ini - its ratio to the norm of initial residual
+		2-abs_val - its value
+		3-rel_rhs - its ratio to the norm of the rhs vector
+	i-convergence treshold
+k	k-output level
+		0-no information is printed to output
+		1-only error information printed
+		2-important (convergence) information printed
+		3-all available information printed
+
+
+Options for standard iterations solver (for fine level a,g,h,i,k as above):
+a b c 	a-solver: 10-standard iterations, 20-multigrid
+	b-number of pre-smooth steps (only for multigrid on the finest level)
+	c-number of post-smooth steps (only for multigrid on the finest level)
+d e f	d-actual solver/smoother (only at the current level): 
+		0-no, 1-block Jacobi, 2-block Gauss-Seidel (both as smoothers)
+		3-additive Schwarz (block Jacobi as preconditioner) 
+		4-ILU(0) (as smoother), 5-ILU(0) (as preconditioner)
+	e-number of internal sweeps for block Jacobi and block Gauss-Seidel
+	f-type of blocks (most useful options):
+		1-one-element blocks
+		2-larger blocks with no overlap (for ILU(0))
+		4-larger blocks with overlap (for block smoothers)
+g h i	g-maximal number of single iterations
+	h-trash (max norm of update used as convergence criterion)
+	i-convergence treshold
+k	k-output level (the same as for the GMRES solver)
+
+
+Options for intermediate level solvers/smoothers:
+b c	b-number of pre-smooth steps
+	c-number of post-smooth steps 
+d e f	d-smoother at the current level: 
+		0-no, 1-block Jacobi, 2-block Gauss-Seidel (both as smoothers)
+		3-additive Schwarz (block Jacobi as preconditioner) 
+		4-ILU(0) (as smoother), 5-ILU(0) (as preconditioner)
+	e-number of internal sweeps for block Jacobi and block Gauss-Seidel
+	f-type of blocks (most useful options):
+		1-one-element blocks
+		2-larger blocks with no overlap (for ILU(0))
+		4-larger blocks with overlap (for block smoothers)
+k	k-output level (the same as for the GMRES solver)
+

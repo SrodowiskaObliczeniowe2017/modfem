@@ -1,0 +1,61 @@
+# Makefile for hybrid mesh module - MeshModule part
+
+$(MOD_FEM_OBJ_DIR)/libhHybridMesh.a : \
+		$(MOD_FEM_OBJ_DIR)/Edge.o \
+		$(MOD_FEM_OBJ_DIR)/ElemT4.o \
+		$(MOD_FEM_OBJ_DIR)/Face4.o \
+		$(MOD_FEM_OBJ_DIR)/hObj.o \
+		$(MOD_FEM_OBJ_DIR)/mesh_configuration.o \
+		$(MOD_FEM_OBJ_DIR)/Vertex.o \
+		$(MOD_FEM_OBJ_DIR)/ElemPrism.o \
+		$(MOD_FEM_OBJ_DIR)/Face3.o \
+		$(MOD_FEM_OBJ_DIR)/hHybridMesh.o \
+		$(MOD_FEM_OBJ_DIR)/hParent.o \
+		$(MOD_FEM_OBJ_DIR)/mmr_vec3.o
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/Edge.o \
+		$(MOD_FEM_OBJ_DIR)/ElemT4.o \
+		$(MOD_FEM_OBJ_DIR)/Face4.o \
+		$(MOD_FEM_OBJ_DIR)/hObj.o \
+		$(MOD_FEM_OBJ_DIR)/mesh_configuration.o \
+		$(MOD_FEM_OBJ_DIR)/Vertex.o \
+		$(MOD_FEM_OBJ_DIR)/ElemPrism.o \
+		$(MOD_FEM_OBJ_DIR)/Face3.o \
+		$(MOD_FEM_OBJ_DIR)/hHybridMesh.o \
+		$(MOD_FEM_OBJ_DIR)/hParent.o \
+		$(MOD_FEM_OBJ_DIR)/mmr_vec3.o
+
+$(MOD_FEM_OBJ_DIR)/Edge.o : Edge.cpp Edge.h
+	$(CPPC) $(CFL) -c Edge.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/ElemT4.o : ElemT4.cpp ElemT4.h ElemT4tables.hpp
+	$(CPPC) $(CFL) -c ElemT4.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/Face4.o : Face4.cpp Face4.h
+	$(CPPC) $(CFL) -c Face4.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/hObj.o : hObj.cpp hObj.h
+	$(CPPC) $(CFL) -c hObj.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/mesh_configuration.o : mesh_configuration.cpp mesh_configuration.h
+	$(CPPC) $(CFL) -c mesh_configuration.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/Vertex.o : Vertex.cpp Vertex.h
+	$(CPPC) $(CFL) -c Vertex.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/ElemPrism.o : ElemPrism.cpp ElemPrism.h
+	$(CPPC) $(CFL) -c ElemPrism.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/Face3.o : Face3.cpp Face3.h
+	$(CPPC) $(CFL) -c Face3.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/hHybridMesh.o : hHybridMesh.cpp hHybridMesh.h
+	$(CPPC) $(CFL) -c hHybridMesh.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/hParent.o : hParent.cpp hParent.hpp
+	$(CPPC) $(CFL) -c hParent.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/mmr_vec3.o : mmr_vec3.cpp mmh_vec3.h
+	$(CPPC) $(CFL) -c mmr_vec3.cpp -o $@ $(INC)
+
+clean:
+	rm -f *.o *.a *~

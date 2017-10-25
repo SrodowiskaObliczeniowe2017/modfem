@@ -1,0 +1,6 @@
+After reading initial data.
+Parameters (number of active, maximal index):
+Elements: nrel 2, nmel 2
+Faces:    nrfa 9, nmfa 9
+Edges:    nred 14, nmed 14
+Nodes:    nrno 8, nmno 8

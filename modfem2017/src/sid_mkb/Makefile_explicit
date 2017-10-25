@@ -1,0 +1,22 @@
+# Makefile for the interface between the FEM code and the multi-level
+#   block iterative solver (using only single level capabilities and GMRES)
+
+$(MOD_FEM_OBJ_DIR)/sil_mkb_lib.a: \
+	  $(MOD_FEM_OBJ_DIR)/sis_mkb_intf.o \
+	  $(MOD_FEM_OBJ_DIR)/sis_mkb_fem_intf.o \
+	  $(MOD_FEM_INC_DIR)/sih_intf.h sih_mkb.h
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/sis_mkb_intf.o \
+          $(MOD_FEM_OBJ_DIR)/sis_mkb_fem_intf.o	
+
+$(MOD_FEM_OBJ_DIR)/sis_mkb_intf.o: sis_mkb_intf.c \
+	  $(MOD_FEM_INC_DIR)/sih_intf.h sih_mkb.h
+	$(CC) $(CFL) -c sis_mkb_intf.c -o $@ $(INC)
+
+
+$(MOD_FEM_OBJ_DIR)/sis_mkb_fem_intf.o: sis_mkb_fem_intf.c \
+	  sih_mkb.h
+	$(CC) $(CFL) -c sis_mkb_fem_intf.c -o $@ $(INC)
+
+clean:
+	rm -f *~ *.o *.a
+

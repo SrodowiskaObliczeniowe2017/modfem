@@ -1,0 +1,14 @@
+# Makefile for the interface between the FEM code and the parallel communication
+# library (PVM, MPI or other)
+
+$(MOD_FEM_OBJ_DIR)/pcl_mpi_lib.a: \
+	$(MOD_FEM_OBJ_DIR)/pcs_mpi_intf.o
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/pcs_mpi_intf.o
+
+
+$(MOD_FEM_OBJ_DIR)/pcs_mpi_intf.o: pcs_mpi_intf.c \
+	$(MOD_FEM_INC_DIR)/pch_intf.h 
+	$(CC) $(CFL) -c pcs_mpi_intf.c -o $@ $(INC)
+
+clean:
+	rm -f *~ *.o *.a

@@ -1,0 +1,83 @@
+# Makefile for general purpose utilities
+$(MOD_FEM_OBJ_DIR)/utl_util_lib.a: \
+	$(MOD_FEM_OBJ_DIR)/uts_util.o \
+	$(MOD_FEM_OBJ_DIR)/uts_ls_intf.o \
+	$(MOD_FEM_OBJ_DIR)/uts_accel_intf.o \
+	$(MOD_FEM_OBJ_DIR)/uts_adapt.o \
+	$(MOD_FEM_OBJ_DIR)/uts_write_paraview.o \
+	$(MOD_FEM_OBJ_DIR)/uts_bc.o \
+	$(MOD_FEM_OBJ_DIR)/uts_io_intf.o \
+	$(MOD_FEM_OBJ_DIR)/uts_mat.o \
+	$(MOD_FEM_OBJ_DIR)/uts_mesh.o \
+	$(MOD_FEM_OBJ_DIR)/uts_log.o \
+	$(MOD_FEM_OBJ_DIR)/uts_io_compression.o \
+	$(MOD_FEM_OBJ_DIR)/miniz.o \
+	$(MOD_FEM_OBJ_DIR)/uts_coloring.o 
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/uts_util.o \
+	$(MOD_FEM_OBJ_DIR)/uts_ls_intf.o \
+	$(MOD_FEM_OBJ_DIR)/uts_accel_intf.o \
+	$(MOD_FEM_OBJ_DIR)/uts_adapt.o \
+	$(MOD_FEM_OBJ_DIR)/uts_write_paraview.o \
+	$(MOD_FEM_OBJ_DIR)/uts_bc.o \
+	$(MOD_FEM_OBJ_DIR)/uts_io_intf.o \
+	$(MOD_FEM_OBJ_DIR)/uts_mat.o \
+	$(MOD_FEM_OBJ_DIR)/uts_mesh.o \
+	$(MOD_FEM_OBJ_DIR)/uts_log.o \
+	$(MOD_FEM_OBJ_DIR)/uts_io_compression.o \
+	$(MOD_FEM_OBJ_DIR)/miniz.o \
+	$(MOD_FEM_OBJ_DIR)/uts_coloring.o
+
+$(MOD_FEM_OBJ_DIR)/uts_util.o: uts_util.c \
+	$(MOD_FEM_INC_DIR)/uth_intf.h 
+	$(CC) $(CFL) -c uts_util.c -o $@ $(INC) 
+
+$(MOD_FEM_OBJ_DIR)/uts_ls_intf.o: uts_ls_intf.c \
+	$(MOD_FEM_INC_DIR)/uth_intf.h uth_accel_intf.h
+	$(CC) $(CFL) -c uts_ls_intf.c -o $@ $(INC) 
+
+$(MOD_FEM_OBJ_DIR)/uts_accel_intf.o: uts_accel_intf.c \
+	$(MOD_FEM_INC_DIR)/uth_intf.h  uth_accel_intf.h
+	$(CC) $(CFL) -c uts_accel_intf.c -o $@ $(INC) 
+
+$(MOD_FEM_OBJ_DIR)/uts_adapt.o: uts_adapt.c \
+	$(MOD_FEM_INC_DIR)/uth_intf.h 
+	$(CC) $(CFL) -c uts_adapt.c -o $@ $(INC) 
+
+$(MOD_FEM_OBJ_DIR)/uts_write_paraview.o: uts_write_paraview.cpp \
+	$(MOD_FEM_INC_DIR)/uth_intf.h 
+	$(CC) $(CFL) -c uts_write_paraview.c -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/uts_bc.o: uts_bc.cpp \
+	$(MOD_FEM_INC_DIR)/uth_intf.h 
+	$(CPPC) $(CFL) -c uts_bc.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/uts_coloring.o: uts_coloring.cpp \
+	$(MOD_FEM_INC_DIR)/uth_intf.h 
+	$(CPPC) $(CFL) -c uts_coloring.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/uts_io_intf.o: uts_io_intf.cpp \
+	$(MOD_FEM_INC_DIR)/uth_intf.h 
+	$(CPPC) $(CFL) -c uts_io_intf.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/uts_mat.o: uts_mat.cpp \
+	$(MOD_FEM_INC_DIR)/uth_intf.h 
+	$(CPPC) $(CFL) -c uts_mat.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/uts_mesh.o: uts_mesh.cpp \
+	$(MOD_FEM_INC_DIR)/uth_intf.h 
+	$(CPPC) $(CFL) -c uts_mesh.cpp -o $@ $(INC)
+
+$(MOD_FEM_OBJ_DIR)/uts_log.o: uts_log.cpp \
+	$(MOD_FEM_INC_DIR)/uth_intf.h
+	$(CPPC) $(CFL) -c uts_log.cpp -o $@ $(INC)        
+
+$(MOD_FEM_OBJ_DIR)/uts_io_compression.o: uts_io_compression.cpp \
+        $(MOD_FEM_INC_DIR)/uth_intf.h
+	$(CPPC) $(CFL) -c uts_io_compression.cpp -o $@ $(INC) 
+
+$(MOD_FEM_OBJ_DIR)/miniz.o: miniz.h
+	$(CC) $(CFL) -c miniz.c -o $@ $(INC)
+
+
+clean:
+	rm -f *~ *.o *.a

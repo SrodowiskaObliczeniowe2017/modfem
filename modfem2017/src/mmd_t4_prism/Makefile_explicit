@@ -1,0 +1,11 @@
+# Makefile for hybrid mesh module 
+
+$(MOD_FEM_OBJ_DIR)/libmmd_t4_prism.a : \
+		$(MOD_FEM_OBJ_DIR)/mms_prism_t4_intf.o
+	$(AR) $@ $(MOD_FEM_OBJ_DIR)/mms_prism_t4_intf.o
+
+$(MOD_FEM_OBJ_DIR)/mms_prism_t4_intf.o : mms_prism_t4_intf.cpp
+	$(CPPC) $(CFL) -c mms_prism_t4_intf.cpp -o $@ $(INC)
+
+clean:
+	rm -f *.o *.a *~

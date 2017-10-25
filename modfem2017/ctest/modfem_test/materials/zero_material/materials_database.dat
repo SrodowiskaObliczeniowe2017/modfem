@@ -1,0 +1,33 @@
+/* ------------------------------------------------------------	*/
+/* IMPORTANT:                                                	*/
+/* 	- both, C and C++ style comments are supported      	*/
+/*      - most values can be set as:				*/				
+/*      	* constants: v = 0.0;				*/
+/*		* piecewise linear interpolated:		*/
+/*			v = ((t1,v1),(t2,v2),....)		*/
+/*	- ALWAYS use "." (dot) when entering numbers!		*/
+/*	  For ex. instead of 20, put 20.0			*/
+/*	- Use same unit system for all values!			*/
+/* ------------------------------------------------------------ */
+
+materials:
+(
+
+            { 
+	      name   = "Test_material 1";
+	      material_number = 1; // MUST BE compatible with data in mesh_files !!!
+
+// for non-dimensional form ref_density and dynamic_viscosity from control
+// parameters are used - otherwise the parameters below are used
+              dynamic_viscosity                 = 0.001;
+              /* piecewise-linear interpolation: (temperature, value) */
+              //density                             = ( (1.0, 1.0), (3000.0, 0.4) );
+
+              /* constant values */
+              density                           = 1.0;
+              thermal_conductivity              = 10.1;
+              specific_heat                     = 1.0;
+              thermal_expansion_coefficient     = 1.0;
+
+            }
+);

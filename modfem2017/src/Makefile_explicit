@@ -1,0 +1,1681 @@
+SHELL = /bin/csh
+
+# MOD_FEM_DIR - directory for MOD_FEM code; variable used to arrange the proper
+# directory structure of the code; to be specified by e.g. (csh, tcsh)
+# $ setenv MOD_FEM_DIR full_directory_name 
+# or (sh, bash, etc.)
+# $ MOD_FEM_DIR="full_directory_name"; export MOD_FEM_DIR
+# or for the use of this Makefile only
+# MOD_FEM_DIR ?= full_directory_name
+# example: 
+# $ setenv MOD_FEM_DIR /home/my_login/modular_fem_code/
+
+# MOD_FEM_ARCH - architecture (platform) name for creating MOD_FEM code;
+# obj and binary files are separately created for each platform. During 
+# compilation file make.MOD_FEM_ARCH placed in MOD_FEM_DIR/src/platform_files  
+# is read to set system dependent options. Then, obj files are placed in
+# MOD_FEM_DIR/obj/MOD_FEM_ARCH directory and binary files are placed in
+# MOD_FEM_DIR/bin/MOD_FEM_ARCH directory; to be specified by e.g. (csh, tcsh)
+# $ setenv MOD_FEM_ARCH architecture_name 
+# or (sh, bash, etc.)
+# $ MOD_FEM_ARCH="architecture_name"; export MOD_FEM_ARCH
+# or for the use of this Makefile only
+# MOD_FEM_ARCH ?= architecture_name
+# example: 
+# $ MOD_FEM_ARCH="fc8_gcc4.1.2_mkl"; export MOD_FEM_ARCH
+
+
+all: config 
+
+config:
+ifeq ($(origin MOD_FEM_DIR), undefined)
+$(error No MOD_FEM_DIR system variable specified for MOD_FEM code directory.\
+ Set MOD_FEM_DIR system variable to the name of the directory\
+ where the current src directory resides - see Makefile for why and how to do it)
+endif
+ifeq ($(origin MOD_FEM_ARCH), undefined)
+$(error No MOD_FEM_ARCH system variable specified for system dependent\
+ compilation. Set MOD_FEM_ARCH system variable to some arbitrarily chosen\
+ platform name - see Makefile for why and how to do it) 
+endif
+	@if (!( -d $(MOD_FEM_DIR)/bin )) mkdir $(MOD_FEM_DIR)/bin
+	@if (!( -d $(MOD_FEM_DIR)/obj )) mkdir $(MOD_FEM_DIR)/obj
+	@if (!( -d $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH) )) mkdir $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)
+	@if (!( -d $(MOD_FEM_DIR)/obj/$(MOD_FEM_ARCH) )) mkdir $(MOD_FEM_DIR)/obj/$(MOD_FEM_ARCH)
+	@echo 'MOD_FEM directory: '$(MOD_FEM_DIR)
+	@echo 'MOD_FEM architecture: '$(MOD_FEM_ARCH)
+	@echo 'MOD_FEM obj files in: '$(MOD_FEM_DIR)'/obj/'$(MOD_FEM_ARCH)
+	@echo 'MOD_FEM binary files in: '$(MOD_FEM_DIR)'/bin/'$(MOD_FEM_ARCH)
+	@echo 'Specify one of the following combinations to perform building:'
+	@echo '"laplace_prism_dg_mkb", "laplace_prism_std_mkb"'
+	@echo '"laplace_prism_2D_dg_mkb", "laplace_prism_2D_std_mkb"'
+	@echo '"laplace_prism_dg_mkb_mpi", "laplace_prism_std_mkb_mpi"'
+	@echo '"laplace_prism_2D_dg_mkb_mpi", "laplace_prism_2D_std_mkb_mpi"'
+	@echo '"conv_diff_prism_dg_mkb", "conv_diff_prism_std_mkb"'
+	@echo '"conv_diff_prism_2D_dg_mkb", "conv_diff_prism_2D_std_mkb"'
+	@echo '"conv_diff_prism_dg_mkb_mpi", "conv_diff_prism_std_mkb_mpi"'
+	@echo '"conv_diff_prism_2D_dg_mkb_mpi", "conv_diff_prism_2D_std_mkb_mpi"'
+	@echo '"elast_prism_std_mkb", "elast_prism_2D_std_mkb"'
+	@echo '"elast_prism_std_pardiso","elast_prism_2D_std_pardiso"'
+#	@echo '"elast_prism_std_mkb_mpi?", "elast_prism_2D_std_mkb_mpi?"'
+	@echo '"ns_supg_prism_std_pardiso_mkb", "ns_supg_prism_std_pardiso_mkb_mpi"'
+	@echo '"ns_supg_prism_std_lapack_mkb", "ns_supg_prism_std_lapack_mkb_mpi"'
+	@echo '"ns_supg_prism_2D_std_pardiso_mkb", "ns_supg_prism_2D_std_pardiso_mkb_mpi"'
+	@echo '"ns_supg_prism_2D_std_lapack_mkb", "ns_supg_prism_2D_std_lapack_mkb_mpi"'
+	@echo '"heat_prism_std_pardiso_mkb", "heat_prism_2D_std_pardiso_mkb"'
+	@echo '"heat_prism_std_pardiso_mkb_ocl", "heat_prism_2D_std_pardiso_mkb_ocl"'
+	@echo '"heat_prism_std_lapack_mkb", "heat_prism_2D_std_lapack_mkb"'
+	@echo '"heat_prism_std_lapack_mkb_ocl", "heat_prism_2D_std_lapack_mkb_ocl"'
+	@echo '"heat_prism_std_pardiso_mkb_mpi", "heat_prism_2D_std_pardiso_mkb_mpi"'
+	@echo '"heat_prism_std_lapack_mkb_mpi", "heat_prism_2D_std_lapack_mkb_mpi"'
+	@echo '"ns_supg_heat_prism_std_pardiso_mkb", "ns_supg_heat_prism_2D_std_pardiso_mkb"'
+	@echo '"ns_supg_heat_prism_std_lapack_mkb", "ns_supg_heat_prism_2D_std_lapack_mkb"'
+	@echo '"ns_supg_heat_prism_std_pardiso_mkb_mpi", "ns_supg_heat_prism_2D_std_pardiso_mkb_mpi"'
+	@echo '"ns_supg_heat_prism_std_lapack_mkb_mpi", "ns_supg_heat_prism_2D_std_lapack_mkb_mpi"'
+	@echo '(pardiso needs C++ loader declared)'
+	@echo ' (example. "make laplace_prism_std_lapack")'
+
+MOD_FEM_OBJ_DIR = $(MOD_FEM_DIR)/obj/$(MOD_FEM_ARCH)
+MOD_FEM_BIN_DIR = $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)
+MOD_FEM_INC_DIR = $(MOD_FEM_DIR)/src/include
+MOD_FEM_LIB_DIR = $(MOD_FEM_DIR)/src/lib
+
+# optimization and other system dependent options
+include  platform_files/make.$(MOD_FEM_ARCH)
+
+# libraries with compiled modules:
+
+# utilities: memory allocation, list management, time measurements, ...
+MOD_FEM_UTIL_LIB = $(MOD_FEM_OBJ_DIR)/utl_time_lib.a \
+                   $(MOD_FEM_OBJ_DIR)/utl_util_lib.a
+
+
+# OpenCL/OpenMP thread management library 
+MOD_FEM_TM_OPENCL_LIB = $(MOD_FEM_OBJ_DIR)/tml_opencl_lib.a
+
+# MPI parallel communication library interface
+MOD_FEM_PC_MPI_LIB = $(MOD_FEM_OBJ_DIR)/pcl_mpi_lib.a
+
+# mesh manipulation module with prismatic elements
+MOD_FEM_MM_PRISM_LIB = $(MOD_FEM_OBJ_DIR)/mml_prism_lib.a
+
+# mesh manipulation module with prismatic elements and 2D adaptivity
+MOD_FEM_MM_PRISM_2D_LIB = $(MOD_FEM_OBJ_DIR)/mml_prism_2D_lib.a
+
+# mesh manipulation PARALLEL module with prismatic elements
+MOD_FEM_MMP_PRISM_LIB = $(MOD_FEM_OBJ_DIR)/mmpl_prism_lib.a \
+                        $(MOD_FEM_OBJ_DIR)/libddm.a
+
+# approximation field module for DG and prismatic elements
+MOD_FEM_AP_DG_PRISM_LIB = $(MOD_FEM_OBJ_DIR)/apl_dg_prism_lib.a
+
+# approximation field PARALLEL module for DG and prismatic elements
+MOD_FEM_APP_DG_PRISM_LIB = $(MOD_FEM_OBJ_DIR)/appl_dg_prism_lib.a
+
+# approximation field module for standard linear approx and prismatic elements
+MOD_FEM_AP_STD_LIN_LIB = $(MOD_FEM_OBJ_DIR)/apl_std_lin_lib.a
+
+# approximation field PARALLEL module for DG and prismatic elements
+MOD_FEM_APP_STD_LIN_LIB = $(MOD_FEM_OBJ_DIR)/appl_std_lin_lib.a
+
+# module for the interface with the LAPACK solver library
+MOD_FEM_SI_LAPACK_LIB = $(MOD_FEM_OBJ_DIR)/sil_lapack_lib.a
+
+# module for the interface with the PARDISO solver library
+MOD_FEM_SI_PARDISO_LIB = $(MOD_FEM_OBJ_DIR)/sil_pardiso_lib.a
+
+# module for the interface with 
+# the multi-level Krylow solver based on block storage
+MOD_FEM_SI_MKB_LIB = $(MOD_FEM_OBJ_DIR)/sil_mkb_lib.a
+
+# multi-level Krylow solver module based on block storage 
+MOD_FEM_LS_MKB_LIB = $(MOD_FEM_OBJ_DIR)/lsl_mkb_lib.a \
+                     $(MOD_FEM_OBJ_DIR)/lsl_mkb_direct_lib.a \
+                     $(MOD_FEM_OBJ_DIR)/lal_block_lib.a \
+                     $(MOD_FEM_OBJ_DIR)/lal_crs_lib.a \
+                     $(MOD_FEM_OBJ_DIR)/lal_crs_generic_lib.a \
+                     $(MOD_FEM_OBJ_DIR)/lal_bcrs_lib.a
+
+# problem dependent obj files for elasticity equations and STD approximation
+MOD_FEM_PD_ELAST_LIB = $(MOD_FEM_OBJ_DIR)/pdl_elast_lib.a
+
+# problem dependent obj files for testing DG modules with Laplace's equation
+MOD_FEM_PD_LAPLACE_DG_LIB = $(MOD_FEM_OBJ_DIR)/pdl_laplace_dg_lib.a
+
+# problem dependent obj files for testing STD modules with Laplace's equation
+MOD_FEM_PD_LAPLACE_STD_LIB = $(MOD_FEM_OBJ_DIR)/pdl_laplace_std_lib.a
+
+# problem dependent obj files for testing DG modules with Conv_Diff's equation
+MOD_FEM_PD_CONV_DIFF_DG_LIB = $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_dg_lib.a
+
+# problem dependent obj files for testing STD modules with Conv_Diff's equation
+MOD_FEM_PD_CONV_DIFF_STD_LIB = $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a
+
+# problem dependent obj files for Navier-Stokes eqns with SUPG stabilization 
+# and STD approximation
+MOD_FEM_PD_NS_SUPG_OLD_LIB = $(MOD_FEM_OBJ_DIR)/pdl_ns_supg_old_lib.a
+
+# problem dependent obj files for Navier-Stokes eqns with SUPG stabilization 
+# and STD approximation
+MOD_FEM_PD_NS_SUPG_LIB = $(MOD_FEM_OBJ_DIR)/pdl_ns_supg_lib.a
+
+# problem dependent obj files for heat conduction with SUPG stabilization 
+# and STD approximation
+MOD_FEM_PD_HEAT_LIB = $(MOD_FEM_OBJ_DIR)/pdl_heat_lib.a
+
+# problem dependent obj files for Navier-Stokes eqns with SUPG stabilization 
+# + heat conduction with SUPG stabilization and STD approximation
+MOD_FEM_PD_NS_SUPG_HEAT_LIB = $(MOD_FEM_OBJ_DIR)/pdl_ns_supg_heat_lib.a
+
+# t4 mesh module
+MOD_FEM_T4_LIB = $(MOD_FEM_OBJ_DIR)/libmmd_t4_prism.a
+MOD_FEM_HM_LIB = $(MOD_FEM_OBJ_DIR)/libhHybridMesh.a
+MOD_FEM_MR_LIB = $(MOD_FEM_OBJ_DIR)/libMeshRead.a
+MOD_FEM_MW_LIB = $(MOD_FEM_OBJ_DIR)/libMeshWrite.a
+
+# std hybrid
+MOD_FEM_AP_STD_HYBRID_LIB = $(MOD_FEM_OBJ_DIR)/apl_std_hybrid_lib.a
+
+export
+
+
+# MOD_FEM code for testing modules using the example of Laplace's equation
+# prismatic elements, DG approximation and Krylow (GMRES) solver
+laplace_prism_dg_mkb: 
+	cd pdd_laplace; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_laplace_dg_lib.a
+	cd sid_lapack; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_laplace_prism_dg_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_LAPLACE_DG_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_DG_PRISM_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "laplace_prism_dg_mkb" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_laplace_prism_dg_mkb'
+
+
+# MOD_FEM code for testing modules using the example of Laplace's equation
+# prismatic elements, standard linear approximation and Krylow 
+# (GMRES) solver
+laplace_prism_std_mkb: 
+	cd pdd_laplace; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_laplace_std_lib.a
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_laplace_prism_std_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_LAPLACE_STD_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "laplace_prism_std_mkb" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_laplace_prism_std_mkb'
+
+# MOD_FEM code for testing modules using the example of Laplace's equation
+# prismatic elements, DG approximation and Krylow (GMRES) solver
+laplace_prism_2D_dg_mkb: 
+	cd pdd_laplace; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_laplace_dg_lib.a
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_laplace_prism_2D_dg_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_LAPLACE_DG_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_DG_PRISM_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "laplace_prism_2D_dg_mkb" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_laplace_prism_2D_dg_mkb'
+
+# MOD_FEM code for testing modules using the example of Laplace's equation
+# prismatic elements, standard linear approximation and Krylow 
+# (GMRES) solver
+laplace_prism_2D_std_mkb: 
+	cd pdd_laplace; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_laplace_std_lib.a
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_laplace_prism_2D_std_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_LAPLACE_STD_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "laplace_prism_2D_std_mkb" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_laplace_prism_2D_std_mkb'
+
+
+laplace_prism_dg_mkb_mpi: 
+	cd pdd_laplace ; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_laplace_dg_lib.a
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd appd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_laplace_prism_dg_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_LAPLACE_DG_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_DG_PRISM_LIB) \
+	$(MOD_FEM_APP_DG_PRISM_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "laplace_prism_dg_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_laplace_prism_dg_mkb_mpi'
+
+laplace_prism_std_mkb_mpi: 
+	cd pdd_laplace ; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_laplace_std_lib.a
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_laplace_prism_std_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_LAPLACE_STD_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "laplace_prism_std_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_laplace_prism_std_mkb_mpi'
+
+laplace_prism_2D_dg_mkb_mpi: 
+	cd pdd_laplace ; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_laplace_dg_lib.a
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd appd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_laplace_prism_2D_dg_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_LAPLACE_DG_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_DG_PRISM_LIB) \
+	$(MOD_FEM_APP_DG_PRISM_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "laplace_prism_2D_dg_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_laplace_prism_2D_dg_mkb_mpi'
+
+laplace_prism_2D_std_mkb_mpi: 
+	cd pdd_laplace ; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_laplace_std_lib.a
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_laplace_prism_2D_std_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_LAPLACE_STD_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "laplace_prism_2D_std_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_laplace_prism_2D_std_mkb_mpi'
+
+# MOD_FEM code for testing modules using the example of Conv_Diff's equation
+# prismatic elements, DG approximation and Krylow (GMRES) solver
+conv_diff_prism_dg_mkb: 
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_dg_lib.a
+	cd sid_lapack; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_prism_dg_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_CONV_DIFF_DG_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_DG_PRISM_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "conv_diff_prism_dg_mkb" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_prism_dg_mkb'
+
+# MOD_FEM code for testing modules using the example of Conv_Diff's equation
+# prismatic elements, DG approximation and Krylow (GMRES) solver
+conv_diff_prism_dg_mkb_ocl: 
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_dg_lib.a
+	cd sid_lapack; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	cd tmd_opencl; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_prism_dg_mkb_ocl \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_CONV_DIFF_DG_LIB) \
+	$(MOD_FEM_TM_OPENCL_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_DG_PRISM_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "conv_diff_prism_dg_mkb_ocl" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_prism_dg_mkb_ocl'
+
+# MOD_FEM code for testing modules using the example of Conv_Diff's equation
+# prismatic elements, standard linear approximation and Krylow 
+# (GMRES) solver
+conv_diff_prism_std_mkb: 
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+#	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_prism_std_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_CONV_DIFF_STD_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "conv_diff_prism_std_mkb" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_prism_std_mkb'
+
+# MOD_FEM code for testing modules using the example of Conv_Diff's equation
+# prismatic elements, standard linear approximation and Krylow 
+# (GMRES) solver - OpenCL multithreading
+conv_diff_prism_std_mkb_ocl: 
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_opencl_lib.a
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+#	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	cd tmd_opencl; $(MAKE) -f Makefile_explicit 
+	$(LDPP) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_prism_std_mkb_ocl \
+        -Wl,--start-group \
+	$(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a \
+	$(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_opencl_lib.a \
+	$(MOD_FEM_TM_OPENCL_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "conv_diff_prism_std_mkb_ocl" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_prism_std_mkb_ocl'
+
+
+# MOD_FEM code for testing modules using the example of Conv_Diff's equation
+# hybrid elements, standard linear approximation and Krylow 
+# (GMRES) solver
+conv_diff_hybrid_std_mkb: 
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_t4_prism; $(MAKE) -f Makefile_explicit
+	cd mmd_t4_prism/MeshRead; $(MAKE) -f Makefile_explicit
+	cd mmd_t4_prism/MeshWrite; $(MAKE) -f Makefile_explicit
+	cd mmd_t4_prism/MeshModule; $(MAKE) -f Makefile_explicit	
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LDPP) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_hybrid_std_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_CONV_DIFF_STD_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_T4_LIB) \
+	$(MOD_FEM_HM_LIB) \
+	$(MOD_FEM_MR_LIB) \
+	$(MOD_FEM_MW_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "conv_diff_hybrid_std_mkb" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_hybrid_std_mkb'
+	 
+# MOD_FEM code for testing modules using the example of Conv_Diff's equation
+# hybrid elements, standard linear approximation and Krylow with OpenCL enabled
+# (GMRES) solver
+conv_diff_hybrid_std_mkb_ocl: 
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_opencl_lib.a
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_t4_prism; $(MAKE) -f Makefile_explicit
+	cd mmd_t4_prism/MeshRead; $(MAKE) -f Makefile_explicit
+	cd mmd_t4_prism/MeshWrite; $(MAKE) -f Makefile_explicit
+	cd mmd_t4_prism/MeshModule; $(MAKE) -f Makefile_explicit	
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	cd tmd_opencl; $(MAKE) -f Makefile_explicit 
+	$(LDPP) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_hybrid_std_mkb_ocl \
+        -Wl,--start-group \
+	$(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a \
+	$(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_opencl_lib.a \
+	$(MOD_FEM_TM_OPENCL_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_T4_LIB) \
+	$(MOD_FEM_HM_LIB) \
+	$(MOD_FEM_MR_LIB) \
+	$(MOD_FEM_MW_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "conv_diff_hybrid_std_mkb_ocl" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_hybrid_std_mkb_ocl'	 
+	 
+
+# MOD_FEM code for testing modules using the example of Conv_Diff's equation
+# prismatic elements, DG approximation and Krylow (GMRES) solver
+conv_diff_prism_2D_dg_mkb: 
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_dg_lib.a
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_prism_2D_dg_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_CONV_DIFF_DG_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_DG_PRISM_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "conv_diff_prism_2D_dg_mkb" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_prism_2D_dg_mkb'
+
+# MOD_FEM code for testing modules using the example of Conv_Diff's equation
+# prismatic elements, standard linear approximation and Krylow 
+# (GMRES) solver
+conv_diff_prism_2D_std_mkb: 
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_prism_2D_std_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_CONV_DIFF_STD_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "conv_diff_prism_2D_std_mkb" \
+	 $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_prism_2D_std_mkb'
+
+
+conv_diff_prism_dg_mkb_mpi: 
+	cd pdd_conv_diff ; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_dg_lib.a
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd appd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_prism_dg_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_CONV_DIFF_DG_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_DG_PRISM_LIB) \
+	$(MOD_FEM_APP_DG_PRISM_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "conv_diff_prism_dg_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_prism_dg_mkb_mpi'
+
+conv_diff_prism_std_mkb_mpi: 
+	cd pdd_conv_diff ; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_prism_std_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_CONV_DIFF_STD_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "conv_diff_prism_std_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_prism_std_mkb_mpi'
+
+conv_diff_prism_2D_dg_mkb_mpi: 
+	cd pdd_conv_diff ; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_dg_lib.a
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd appd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_prism_2D_dg_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_CONV_DIFF_DG_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_DG_PRISM_LIB) \
+	$(MOD_FEM_APP_DG_PRISM_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "conv_diff_prism_2D_dg_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_prism_2D_dg_mkb_mpi'
+
+conv_diff_prism_2D_std_mkb_mpi: 
+	cd pdd_conv_diff ; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_conv_diff_std_lib.a
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_conv_diff_prism_2D_std_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_CONV_DIFF_STD_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "conv_diff_prism_2D_std_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_conv_diff_prism_2D_std_mkb_mpi'
+
+# MOD_FEM code for elasticity with standard approximation and LAPACK solver
+elast_prism_std_lapack: 
+	cd pdd_elast; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_elast_prism_std_lapack \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_ELAST_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "elast_prism_std_lapack": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_elast_prism_std_lapack'
+
+# MOD_FEM code for elasticity with standard approximation and KRYLOW solver
+elast_prism_std_mkb: 
+	cd pdd_elast; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_elast_prism_std_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_ELAST_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "elast_prism_std_mkb": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_elast_prism_std_mkb'
+
+# MOD_FEM code for elasticity with dg approximation and KRYLOW solver
+elast_prism_dg_mkb: 
+	cd pdd_elast; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_elast_prism_dg_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_ELAST_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_DG_PRISM_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "elast_prism_dg_mkb": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_elast_prism_dg_mkb'
+
+# MOD_FEM code for elasticity with standard approximation and PARDISO solver
+elast_prism_std_pardiso: 
+	cd pdd_elast; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_elast_prism_std_pardiso \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_ELAST_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "elast_prism_std_pardiso": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_elast_prism_std_pardiso'
+
+# MOD_FEM code for elasticity with 2D prismatic elements standard approximation and LAPACK solver
+elast_prism_2D_std_lapack: 
+	cd pdd_elast; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_elast_prism_2D_std_lapack \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_ELAST_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "elast_prism_2D_std_lapack": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_elast_prism_2D_std_lapack'
+
+# MOD_FEM code for elasticity with 2D prismatic elements standard approximation and KRYLOW solver
+elast_prism_2D_std_mkb: 
+	cd pdd_elast; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_elast_prism_2D_std_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_ELAST_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "elast_prism_2D_std_mkb": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_elast_prism_2D_std_mkb'
+
+# MOD_FEM code for elasticity with 2D prismatic elements, standard approximation and PARDISO solver
+elast_prism_2D_std_pardiso: 
+	cd pdd_elast; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_elast_prism_2D_std_pardiso \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_ELAST_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "elast_prism_2D_std_pardiso": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_elast_prism_2D_std_pardiso'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_prism_std_pardiso_mkb: 
+	cd pdd_ns_supg; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_prism_std_pardiso_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_prism_std_pardiso_mkb": \
+	$(MOD_FEM_BIN_DIR)/MFEM_ns_supg_prism_std_pardiso_mkb'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_prism_std_lapack_mkb: 
+	cd pdd_ns_supg; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_prism_std_lapack_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_prism_std_lapack_mkb": \
+	$(MOD_FEM_BIN_DIR)/MFEM_ns_supg_prism_std_lapack_mkb'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_prism_std_pardiso_mkb_mpi: 
+	cd pdd_ns_supg; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_prism_std_pardiso_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_prism_std_pardiso_mkb_mpi": \
+	$(MOD_FEM_BIN_DIR)/MFEM_ns_supg_prism_std_pardiso_mkb_mpi'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_prism_std_lapack_mkb_mpi: 
+	cd pdd_ns_supg; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_prism_std_lapack_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_prism_std_lapack_mkb_mpi": \
+	$(MOD_FEM_BIN_DIR)/MFEM_ns_supg_prism_std_lapack_mkb_mpi'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_prism_2D_std_pardiso_mkb: 
+	cd pdd_ns_supg; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit 
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_prism_2D_std_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_prism_2D_std_mkb": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_ns_supg_prism_2D_std_mkb'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_prism_2D_std_pardiso_mkb_mpi: 
+	cd pdd_ns_supg; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_prism_2D_std_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_prism_2D_std_mkb_mpi": \
+	$(MOD_FEM_BIN_DIR)/MFEM_ns_supg_prism_2D_std_mkb_mpi'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_prism_2D_std_lapack_mkb: 
+	cd pdd_ns_supg; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_prism_2D_std_lapack_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_prism_2D_std_lapack_mkb": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_ns_supg_prism_2D_std_lapack_mkb'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_prism_2D_std_lapack_mkb_mpi: 
+	cd pdd_ns_supg; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_prism_2D_std_lapack_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_prism_2D_std_lapack_mkb_mpi": \
+	$(MOD_FEM_BIN_DIR)/MFEM_ns_supg_prism_2D_std_lapack_mkb_mpi'
+
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# hybrid elements, Standard approximation and PARDISO solver
+ns_supg_hybrid_std_pardiso: 
+	cd pdd_ns_supg; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_t4_prism; cmake .;$(MAKE); mv libmmd_t4_prism.a $(MOD_FEM_OBJ_DIR)/libmmd_t4_prism.a;
+	cd mmd_t4_prism/MeshRead; mv libMeshRead.a $(MOD_FEM_OBJ_DIR)/libMeshRead.a
+	cd mmd_t4_prism/MeshWrite; mv libMeshWrite.a $(MOD_FEM_OBJ_DIR)/libMeshWrite.a
+	cd mmd_t4_prism/MeshModule; mv libhHybridMesh.a $(MOD_FEM_OBJ_DIR)/libhHybridMesh.a	
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(CPPC) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_hybrid_std_pardiso \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_T4_LIB) \
+	$(MOD_FEM_HM_LIB) \
+	$(MOD_FEM_MR_LIB) \
+	$(MOD_FEM_MW_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_hybrid_std_pardiso": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_ns_supg_hybrid_std_pardiso'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+heat_prism_std_pardiso_mkb: 
+	cd pdd_heat; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_heat_prism_std_pardiso_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_HEAT_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "heat_prism_std_pardiso_mkb": \
+	$(MOD_FEM_BIN_DIR)/MFEM_heat_prism_std_pardiso_mkb'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+heat_prism_std_pardiso_mkb_ocl: 
+	cd pdd_heat; $(MAKE) -f Makefile_explicit 
+	cd pdd_heat; $(MAKE) -f Makefile_explicit $(MOD_FEM_OBJ_DIR)/pdl_heat_std_opencl_lib.a
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	cd tmd_opencl; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_heat_prism_std_pardiso_mkb_ocl \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_HEAT_LIB) \
+	$(MOD_FEM_OBJ_DIR)/pdl_heat_std_opencl_lib.a \
+	$(MOD_FEM_TM_OPENCL_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "heat_prism_std_pardiso_mkb_ocl": \
+	$(MOD_FEM_BIN_DIR)/MFEM_heat_prism_std_pardiso_mkb_ocl'
+
+heat_prism_std_pardiso_mkb_mpi: 
+	cd pdd_heat; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_heat_prism_std_pardiso_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_HEAT_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "heat_prism_std_pardiso_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_heat_prism_std_pardiso_mkb_mpi'
+
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+heat_prism_2D_std_pardiso_mkb: 
+	cd pdd_heat; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_heat_prism_2D_std_pardiso_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_HEAT_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "heat_prism_2D_std_pardiso_mkb": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_heat_prism_2D_std_pardiso_mkb'
+
+heat_prism_2D_std_pardiso_mkb_mpi: 
+	cd pdd_heat; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_heat_prism_2D_std_pardiso_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_HEAT_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "heat_prism_2D_std_pardiso_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_heat_prism_2D_std_pardiso_mkb_mpi'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+heat_prism_std_lapack_mkb: 
+	cd pdd_heat; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_heat_prism_std_lapack_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_HEAT_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "heat_prism_std_lapack_mkb": \
+	$(MOD_FEM_BIN_DIR)/MFEM_heat_prism_std_lapack_mkb'
+
+heat_prism_std_lapack_mkb_mpi: 
+	cd pdd_heat; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_heat_prism_std_lapack_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_HEAT_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "heat_prism_std_lapack_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_heat_prism_std_lapack_mkb_mpi'
+
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+heat_prism_2D_std_lapack_mkb: 
+	cd pdd_heat; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_heat_prism_2D_std_lapack_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_HEAT_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "heat_prism_2D_std_lapack_mkb": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_heat_prism_2D_std_lapack_mkb'
+
+heat_prism_2D_std_lapack_mkb_mpi: 
+	cd pdd_heat; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_heat_prism_2D_std_lapack_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_HEAT_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "heat_prism_2D_std_lapack_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_heat_prism_2D_std_lapack_mkb_mpi'
+
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_heat_prism_std_pardiso_mkb: 
+	cd pdd_ns_supg_heat; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_heat_prism_std_pardiso_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_HEAT_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_heat_prism_std_pardiso_mkb": \
+	$(MOD_FEM_BIN_DIR)/MFEM_ns_supg_heat_prism_std_pardiso_mkb'
+
+ns_supg_heat_prism_std_pardiso_mkb_mpi: 
+	cd pdd_ns_supg_heat; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_heat_prism_std_pardiso_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_NS_SUPG_HEAT_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "ns_supg_heat_prism_std_pardiso_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_ns_supg_heat_prism_std_pardiso_mkb_mpi'
+
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_heat_prism_2D_std_pardiso_mkb: 
+	cd pdd_ns_supg_heat; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_heat_prism_2D_std_pardiso_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_HEAT_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_heat_prism_2D_std_pardiso_mkb": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_ns_supg_heat_prism_2D_std_pardiso_mkb'
+
+ns_supg_heat_prism_2D_std_pardiso_mkb_mpi: 
+	cd pdd_ns_supg_heat; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_heat_prism_2D_std_pardiso_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_NS_SUPG_HEAT_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_PARDISO_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "ns_supg_heat_prism_2D_std_pardiso_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_ns_supg_heat_prism_2D_std_pardiso_mkb_mpi'
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_heat_prism_std_lapack_mkb: 
+	cd pdd_ns_supg_heat; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_heat_prism_std_lapack_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_HEAT_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_heat_prism_std_lapack_mkb": \
+	$(MOD_FEM_BIN_DIR)/MFEM_ns_supg_heat_prism_std_lapack_mkb'
+
+ns_supg_heat_prism_std_lapack_mkb_mpi: 
+	cd pdd_ns_supg_heat; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_heat_prism_std_lapack_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_NS_SUPG_HEAT_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "ns_supg_heat_prism_std_lapack_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_ns_supg_heat_prism_std_lapack_mkb_mpi'
+
+
+# MOD_FEM code for Navier-Stokes equations with SUPG stabilization,
+# prismatic elements, Standard approximation and KRYLOW solver
+ns_supg_heat_prism_2D_std_lapack_mkb: 
+	cd pdd_ns_supg_heat; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_heat_prism_2D_std_lapack_mkb \
+        -Wl,--start-group \
+	$(MOD_FEM_UTIL_LIB) \
+	$(MOD_FEM_PD_NS_SUPG_HEAT_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+        -Wl,--end-group \
+	$(LIB) 
+	@echo 'MOD_FEM executable for "ns_supg_heat_prism_2D_std_lapack_mkb": \
+	 $(MOD_FEM_BIN_DIR)/MFEM_ns_supg_heat_prism_2D_std_lapack_mkb'
+
+ns_supg_heat_prism_2D_std_lapack_mkb_mpi: 
+	cd pdd_ns_supg_heat; $(MAKE) -f Makefile_explicit 
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit 
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit 
+	cd mmpd_prism; $(MAKE) -f Makefile_explicit 
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd appd_std_lin; $(MAKE) -f Makefile_explicit 
+	cd sid_lapack; $(MAKE) -f Makefile_explicit
+	cd sid_mkb; $(MAKE) -f Makefile_explicit 
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit 
+	cd utd_system; $(MAKE) -f Makefile_explicit 
+	cd utd_util; $(MAKE) -f Makefile_explicit 
+	$(LD) $(LDFL) \
+	-o $(MOD_FEM_DIR)/bin/$(MOD_FEM_ARCH)/MFEM_ns_supg_heat_prism_2D_std_lapack_mkb_mpi \
+        -Wl,--start-group \
+	$(MOD_FEM_PD_NS_SUPG_HEAT_LIB) \
+	$(MOD_FEM_PC_MPI_LIB) \
+	$(MOD_FEM_MM_PRISM_2D_LIB) \
+	$(MOD_FEM_MMP_PRISM_LIB) \
+	$(MOD_FEM_AP_STD_LIN_LIB) \
+	$(MOD_FEM_APP_STD_LIN_LIB) \
+	$(MOD_FEM_SI_LAPACK_LIB) \
+	$(MOD_FEM_SI_MKB_LIB) \
+	$(MOD_FEM_LS_MKB_LIB) \
+	$(MOD_FEM_UTIL_LIB) \
+        -Wl,--end-group \
+	$(LIB_PARAL) $(LIB)
+	@echo 'MOD_FEM executable for "ns_supg_heat_prism_2D_std_lapack_mkb_mpi"  \
+        $(MOD_FEM_BIN_DIR)/MFEM_ns_supg_heat_prism_2D_std_lapack_mkb_mpi'
+
+
+# for cleaning
+clean: 
+	rm -f ../obj/$(MOD_FEM_ARCH)/*.o  
+	rm -f ../obj/$(MOD_FEM_ARCH)/*.a  
+
+deep_clean: 
+	rm -f ../bin/$(MOD_FEM_ARCH)/*  
+	rm -f ../obj/$(MOD_FEM_ARCH)/*.o  
+	rm -f ../obj/$(MOD_FEM_ARCH)/*.a  
+	cd pdd_laplace; $(MAKE) -f Makefile_explicit  clean
+	cd pdd_conv_diff; $(MAKE) -f Makefile_explicit  clean
+	cd pdd_elast; $(MAKE) -f Makefile_explicit  clean
+	cd sid_mkb; $(MAKE) -f Makefile_explicit  clean
+	cd sid_pardiso; $(MAKE) -f Makefile_explicit  clean
+	cd sid_lapack; $(MAKE) -f Makefile_explicit  clean
+	cd sid_mkb; $(MAKE) -f Makefile_explicit  clean
+	cd lsd_mkb; $(MAKE) -f Makefile_explicit  clean
+	cd apd_std_lin; $(MAKE) -f Makefile_explicit  clean
+	cd apd_dg_prism; $(MAKE) -f Makefile_explicit  clean
+	cd mmd_prism; $(MAKE) -f Makefile_explicit  clean
+	cd mmd_prism_2D; $(MAKE) -f Makefile_explicit  clean
+	cd mmd_t4_prism; $(MAKE) -f Makefile_explicit  clean
+	cd mmd_t4_prism/MeshModule; $(MAKE) -f Makefile_explicit  clean
+	cd mmd_t4_prism/MeshRead; $(MAKE) -f Makefile_explicit  clean
+	cd mmd_t4_prism/MeshWrite; $(MAKE) -f Makefile_explicit  clean
+	cd utd_util; $(MAKE) -f Makefile_explicit  clean
+	cd utd_system; $(MAKE) -f Makefile_explicit  clean
+	cd pcd_mpi; $(MAKE) -f Makefile_explicit clean

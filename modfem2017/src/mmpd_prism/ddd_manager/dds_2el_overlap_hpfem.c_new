@@ -1,0 +1,812 @@
+/************************************************************************
+File dds_2el_overlap_hpfem.c - overlap management routines, support exchange 
+                     of data between processors 
+
+Contains definitions of routines:   
+  ddr_node_elems - to prepare lists of all elements (active and
+                   inactive) to which belong subsequent nodes
+  ddr_create_overlap
+
+------------------------------  			
+History:        
+	02.2002 - Krzysztof Banas, initial version		
+*************************************************************************/
+
+#include<stdlib.h>
+#include<stdio.h>
+#include<string.h>
+#include<math.h>
+
+/* interface of the mesh manipulation module */
+#include "mmh_intf.h"	
+
+/* interface of the mesh manipulation module */
+#include "mmph_intf.h"	
+
+/* interface of the mesh manipulation module */
+#include "../mmph_prism.h"	
+
+/* domain decomposition interface specification */
+#include "./ddh_front.h"
+
+/* internal info for domain decomposition manager */
+#include "./ddh_manager.h"
+
+#define MAXELNO 100
+static int **elems=NULL;
+
+static int max_node=0;
+
+/*---------------------------------------------------------
+  ddr_vert_elems - to prepare lists of all elements (active and
+                   inactive) to which belong subsequent nodes
+---------------------------------------------------------*/
+int ddr_vert_elems(
+  int Mesh_id,      /* in: mesh ID */
+  int Gen_lev,       /* in: generation level as basis for decomposition */
+  int **Vert_elems  /* out: list of lists of vertices' elements */
+)
+{
+
+  const int zero =  0;
+  int max_elem_id, max_node_id;
+  int i, iaux, nel, nno, ino, ipr;
+  int el_nodes[MMC_MAXELVNO+1];
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+  
+  max_node_id = mmr_get_max_node_id(Mesh_id);
+
+  if(Vert_elems==NULL){
+    printf("Old entry to vert-elems with NULL array - change\n");
+    exit(-1);
+  } /* end if Vert_elems==NULL */
+  else{
+
+    /* divide nodes into external and other */
+    nel=0;
+    while((nel=mmr_get_next_elem_all(Mesh_id, nel))!=0){
+
+      if(mmr_el_gen(Mesh_id,nel)<=Gen_lev &&
+	 mmpr_el_owner(Mesh_id,nel)==mmpv_my_proc_id){
+
+	/* for all owned element's nodes */ 
+	mmr_el_node_coor(Mesh_id, nel, el_nodes, NULL);
+
+	for(ino=0;ino<el_nodes[0];ino++){
+
+	  nno = el_nodes[ino+1];
+
+/*kbw
+#ifdef DEBUG_MMM
+	  printf("proc %d, nel %d, nno %d\n",
+		 mmpv_my_proc_id, nel, nno);
+#endif
+/*kew*/
+
+	  /* allocate Vert_elems for internal or boundary node */
+	  if(Vert_elems[nno]==NULL){
+
+	    Vert_elems[nno] = malloc(MAXELNO*sizeof(int));
+	    Vert_elems[nno][0]=0;
+#ifdef DEBUG_MMM
+	    for(i=1;i<MAXELNO;i++) Vert_elems[nno][i]=0;
+#endif
+	  }
+
+	} /* end for all element's nodes: ino */
+      } /* end if owned element */
+    } /* end loop over all elements: nel */
+
+
+    /* loop over elements */
+    nel=0;
+    while((nel=mmr_get_next_elem_all(Mesh_id, nel))!=0){
+    
+      mmr_el_node_coor(Mesh_id,nel,el_nodes,NULL);
+    
+      for(nno=1;nno<=el_nodes[0];nno++){
+	ino=el_nodes[nno];
+
+	if(Vert_elems[ino]!=NULL){
+
+#ifdef DEBUG_MMM
+	  i=ddr_chk_list(nel,&Vert_elems[ino][1],MAXELNO-1);
+	  if(i>0){
+	    printf("Something wrong in filling NODES->Vert_elems for node %d\n",ino);
+	    for(ipr=1;ipr<MAXELNO;ipr++) 
+	      printf("%d\n",Vert_elems[ino][ipr]);
+	    printf("\n");
+	    exit(-1);;
+	  }
+#endif
+
+	  Vert_elems[ino][0]++;
+	  Vert_elems[ino][Vert_elems[ino][0]] = nel;
+
+/*kbw
+#ifdef DEBUG_MMM
+	printf("node %d (%d), added element %d, gen %d, list (length %d): ",
+	       ino, el_nodes[nno], nel, mmr_el_gen(Mesh_id, nel), Vert_elems[ino][0]);
+	for(ipr=1;ipr<=Vert_elems[ino][0];ipr++){
+	  printf("%d ",Vert_elems[ino][ipr]);
+	}
+	printf("\n");
+#endif
+/*kew*/
+	} /* end if node internal or boundary */
+      } /* end for all element's nodes: ino */
+    } /* end loop over all elements: nel */
+  }
+
+#ifdef DEBUG_MMM
+  iaux=0;
+  for(ino=1;ino<=max_node_id;ino++){
+    if(Vert_elems[ino]!=NULL&&Vert_elems[ino][0]>iaux) iaux = Vert_elems[ino][0];
+  }
+  printf("Maximal number of vert_elems - %d\n", iaux);
+#endif
+
+  return(0);
+}
+
+/*---------------------------------------------------------
+  ddr_add_elem_ovl - to add an element to the overlap with all
+                     its antecedents in a recursive manner
+---------------------------------------------------------*/
+int ddr_add_elem_ovl(
+  int Mesh_id, /* in: mesh ID */
+  int El       /* in: element ID */
+  );
+
+/*---------------------------------------------------------
+  ddr_add_face_ovl - to add a face to the overlap with all
+                     its antecedents in a recursive manner
+---------------------------------------------------------*/
+int ddr_add_face_ovl(
+  int Mesh_id, /* in: mesh ID */
+  int Fa       /* in: face ID */
+  );
+
+/*---------------------------------------------------------
+  ddr_add_edge_ovl - to add an edge to the overlap with all
+                     its antecedents in a recursive manner
+---------------------------------------------------------*/
+int ddr_add_edge_ovl(
+  int Mesh_id, /* in: mesh ID */
+  int Ed       /* in: edge ID */
+  );
+
+/*---------------------------------------------------------
+  ddr_create_overlap
+---------------------------------------------------------*/
+int ddr_create_overlap(  /* returns: >=0 - success code, <0 - error code */
+  int Mesh_id,      /* in: mesh ID */
+  int Ovl_size,
+  int Gen_lev       /* in: generation level as basis for decomposition */
+  )
+{
+
+  int nno, nel, ino, iel, ied, ifa, nfa, ipid, iaux, jaux, i, ient;
+  int max_node_id, nr_alien;
+  int el_nodes[MMC_MAXELVNO+1];
+  const int zero =  0;
+  const int one  =  1;
+  const int mone = -1;
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+
+  max_node_id = mmr_get_max_node_id(Mesh_id);
+
+  /* if elems arrays do not exist */
+  if(elems==NULL || max_node_id!=max_node){
+
+    /* if number of nodes changed */ 
+    if(max_node_id!=max_node){
+
+      for(ino=1;ino<=max_node;ino++) {
+	if(elems[ino]!=NULL) free(elems[ino]);
+      }
+      free(elems);
+
+    }
+    max_node = max_node_id;
+
+    elems = malloc((max_node_id+1)*sizeof(int *));
+    for(ino=1;ino<=max_node_id;ino++){
+      elems[ino]=NULL;  
+    }
+    /* prepare array of element connectivities - all vertices belonging to */
+    /* owned elements get elems array with lists of all adjacent elements */
+    ddr_vert_elems(Mesh_id, Gen_lev, elems); 
+
+  }
+
+
+  /* create two-element overlap (each subdomain extended by one element) */
+  /* - suitable for DG-FEM approximation */
+  ino=0;
+  while((ino=mmr_get_next_node_all(Mesh_id, ino))!=0){
+
+    /* for each old boundary and internal node */
+    if(elems[ino]!=NULL){
+
+      nr_alien=0;
+      for(iel=1;iel<=elems[ino][0];iel++){
+	if(mmpv_my_proc_id!=mmpr_el_owner(Mesh_id,elems[ino][iel])){
+	  nr_alien++;
+	}
+      }
+
+      if(nr_alien>0 && nr_alien<elems[ino][0]){
+
+	/* old boundary node - will become internal */
+/*kbw*/
+#ifdef DEBUG_MMM
+	printf("Node %d, owned by %d - old boundary of %d\n", ino, 
+	       mmpr_ve_owner(Mesh_id, ino), mmpv_my_proc_id);
+#endif
+/*kew*/
+
+	/* for all elements adjacent to old boundary node */
+	for(iel=1;iel<=elems[ino][0];iel++){ 
+
+	  nel=elems[ino][iel];
+
+	  /* to create two-element overlap between subdomains */
+	  if(mmr_el_gen(Mesh_id,nel)==Gen_lev ) {
+
+	    iaux = 0;
+	    if(Ovl_size==2 && 
+	       mmpv_my_proc_id!=mmpr_el_owner(Mesh_id,nel)) iaux = 1;
+	    if(Ovl_size==1 && 
+	       mmpv_my_proc_id>mmpr_el_owner(Mesh_id,nel)) iaux = 1;
+
+	    if(iaux>0){
+	    //printf("Warning: 2 INITIAL elements overlap !!!\n");
+
+/*kbw*/
+#ifdef DEBUG_MMM
+	    printf("Overlap element %d, owned by %d\n",
+		   nel,mmpr_el_owner(Mesh_id, nel));
+#endif
+/*kew*/
+	    
+	      ddr_add_elem_ovl(Mesh_id, nel);
+
+	    } /* end if element not owned */
+
+	  } /* end if element of proper generation */
+	} /* end for all node's elements */
+
+      } /* end if old boundary node */ 
+    } /* end if old boundary or internal node */
+  } /* end loop over all nodes */
+
+  getchar();getchar();
+
+  /* check element ownership */
+  iel=0;
+  while((iel=mmr_get_next_elem_all(Mesh_id, iel))!=0){
+
+
+    ipid=mmr_el_ipid(Mesh_id,iel);
+    if(ipid<0) {
+      mmr_el_set_ipid(Mesh_id,iel,-ipid);
+/*kbw
+#ifdef DEBUG_MMM
+      printf("element %d, in overlap of subdoamin %d (ipid %d)\n",
+	     iel, mmpv_my_proc_id, (-ipid)%DDC_MAX_PROC);
+#endif
+/*kew*/
+    }
+    else if(ipid>0) {
+#ifdef DEBUG_MMM
+      if(ddr_get_owner(Mesh_id,MMC_ELEMENT,iel)==mmpv_my_proc_id){
+	printf("element %d, external to %d owned by %d\n",
+	       iel, mmpv_my_proc_id, (ipid)%DDC_MAX_PROC);
+	exit(-1);
+      }
+#endif
+      mmr_el_set_ipid(Mesh_id,iel,mone);
+/*kbw
+#ifdef DEBUG_MMM
+      printf("element %d, external to %d owned by %d\n",
+	     iel, mmpv_my_proc_id, (ipid)%DDC_MAX_PROC);
+#endif
+/*kew*/
+    }
+/*kbw
+#ifdef DEBUG_MMM
+    else{
+      printf("element %d, internal to %d owned by %d\n",
+	     iel, mmpv_my_proc_id, (ipid)%DDC_MAX_PROC);
+    }
+#endif
+/*kew*/
+  }
+
+  /* check again for internal and boundary nodes */ 
+  ino=0;
+  while((ino=mmr_get_next_node_all(Mesh_id, ino))!=0){
+
+#ifdef DEBUG_MMM
+    if(abs(mmr_ve_ipid(Mesh_id,ino))%DDC_MAX_PROC==mmpv_my_proc_id){
+      printf("Error : owned node %d, subdoamin %d - not zeroed\n",
+	     ino, mmpv_my_proc_id);
+      mmr_ve_set_ipid(Mesh_id, ino, zero);
+      //exit(-1);
+    }
+#endif
+
+    ipid=mmr_ve_ipid(Mesh_id,ino);
+
+    if(ipid==0){
+/*kbw
+#ifdef DEBUG_MMM
+      printf("Node %d, owned by %d - internal to %d\n", ino, 
+	     ddr_get_owner(Mesh_id, MMC_NODE, ino), mmpv_my_proc_id);
+#endif
+/*kew*/
+    }
+    else if(ipid<0){
+/*kbw
+#ifdef DEBUG_MMM
+      printf("Node %d, owned by %d - close to boundary of %d\n", ino, 
+	     ddr_get_owner(Mesh_id, MMC_NODE, ino), mmpv_my_proc_id);
+#endif
+/*kew*/
+      mmr_ve_set_ipid(Mesh_id, ino, -ipid);
+    }
+    else{
+/*kbw
+#ifdef DEBUG_MMM
+      printf("Node %d, owned by %d - external to %d\n", ino, 
+	     ddr_get_owner(Mesh_id, MMC_NODE, ino), mmpv_my_proc_id);
+#endif
+/*kew*/
+      mmr_ve_set_ipid(Mesh_id, ino, mone);
+    }
+  }
+
+  /* check */
+
+  /* indicate ownership for edges */
+  ied=0;
+  while((ied=mmr_get_next_edge_all(Mesh_id, ied))!=0){
+
+    iaux=mmr_ed_ipid(Mesh_id, ied);
+    if(iaux<0){
+      mmr_ed_set_ipid(Mesh_id, ied, -iaux);
+    }
+    else if(iaux>0){
+      mmr_ed_set_ipid(Mesh_id, ied, mone);
+    }
+
+  }
+
+  /* indicate ownership for faces */
+  ifa=0;
+  while((ifa=mmr_get_next_face_all(Mesh_id, ifa))!=0){
+
+    iaux=mmr_fa_ipid(Mesh_id, ifa);
+
+/*kbw
+	if(ifa>=1976&&ifa<=1979){
+	  printf("face %d, iaux %d\n",ifa,iaux);
+	}
+/*kew*/
+
+    if(iaux<0){
+      mmr_fa_set_ipid(Mesh_id, ifa, -iaux);
+    }
+    else if(iaux>0){
+      mmr_fa_set_ipid(Mesh_id, ifa, mone);
+    }
+
+  }
+
+
+  max_node_id = mmr_get_max_node_id(Mesh_id);
+  for(ino=1;ino<=max_node_id;ino++){
+
+    if(elems[ino]!=NULL){
+      free(elems[ino]);
+    }
+
+  }
+  free(elems);
+  elems=NULL;
+
+
+  /* indicate boundary faces */
+  iel=0;
+  while((iel=mmr_get_next_elem_all(Mesh_id, iel))!=0){
+
+    if(mmr_el_ipid(Mesh_id,iel)>=0){
+
+      int el_faces[MMC_MAXELFAC+1];
+
+      mmr_el_faces(Mesh_id, iel, el_faces, NULL);
+
+      for(nfa=0;nfa<el_faces[0];nfa++) {
+
+	int fa_neig[2], fa_sons[5], neig, ifa, ineig, side;
+
+	ifa = el_faces[nfa+1];
+
+/*kbw
+	if(ifa==10325||ifa==96){
+	  //if(ifa>=1976&&ifa<=1979){
+	  printf("element %d, face %d\n",iel, ifa);
+	}
+/*kew*/
+
+	mmr_fa_eq_neig(Mesh_id, ifa, fa_neig, NULL, NULL);
+/*kbw
+	if(ifa==10325||ifa==96){
+	  //if(ifa>=1976&&ifa<=1979){
+	  printf("equal size neighbors %d, %d\n",fa_neig[0], fa_neig[1]);
+	}
+/*kew*/
+	for(ineig=0;ineig<2;ineig++){
+	  if(fa_neig[ineig]!=iel){
+	    side=ifa;
+	    neig=fa_neig[ineig];
+	    while(neig==MMC_BIG_NGB){
+	      side=mmr_fa_fam(Mesh_id, side, NULL, NULL);
+	      if(side==0){
+		neig=MMC_SUB_BND;
+	      }
+	      else{
+		mmr_fa_eq_neig(Mesh_id, side, fa_neig, NULL, NULL);
+		neig=fa_neig[ineig];
+	      }
+	    }
+	    
+	    if(neig==MMC_SUB_BND){
+/*kbw
+		if(ifa==10325||ifa==96){
+		  printf("sub bnd %d, side %d\n",neig, ineig);
+		}
+/*kew*/
+	      mmr_fa_set_sub_bnd(Mesh_id,ifa,ineig);
+	      if(mmr_fa_status(Mesh_id,ifa)==MMC_INACTIVE){
+		/* add children */
+		mmr_fa_fam(Mesh_id, ifa, fa_sons, NULL);
+		for(i=1;i<=fa_sons[0];i++){
+/*kbw
+		if(fa_sons[i]==10325){
+		  printf("face %d, as child of %d, sub bnd %d, side %d\n",
+			 fa_sons[i], ifa, neig, ineig);
+		}
+/*kew*/
+		  mmr_fa_set_sub_bnd(Mesh_id,fa_sons[i],ineig);
+		}
+	      }
+
+	      continue;
+	    }
+	    else if(neig>0){
+	      if(mmr_el_ipid(Mesh_id,neig)<0){
+/*kbw
+		if(ifa==10325||ifa==96){
+		  printf("external neighbor %d, side %d\n",neig, ineig);
+		}
+/*kew*/
+		mmr_fa_set_sub_bnd(Mesh_id,ifa,ineig);
+		if(mmr_fa_status(Mesh_id,ifa)==MMC_INACTIVE){
+		  /* add children */
+		  mmr_fa_fam(Mesh_id, ifa, fa_sons, NULL);
+		  for(i=1;i<=fa_sons[0];i++){
+/*kbw
+		    if(fa_sons[i]==10325){
+		      printf("face %d, as child of %d, sub bnd %d, side %d\n",
+			     fa_sons[i], ifa, neig, ineig);
+		    }
+/*kew*/
+		    mmr_fa_set_sub_bnd(Mesh_id,fa_sons[i],ineig);
+		  }
+		}
+		continue;
+	      }
+	    }
+	  }
+	}
+      }
+    }
+  }
+  
+
+  /* delete external entities */
+  /* since we delete structures we cannot use standard iterators */
+
+  /* elements */
+  iaux = mmr_get_max_elem_id(Mesh_id);
+  for(ient=1;ient<=iaux;ient++){
+    if(mmr_el_status(Mesh_id,ient)!=MMC_FREE&&mmr_el_ipid(Mesh_id,ient)<0){
+      mmr_del_elem(Mesh_id,ient);
+    }
+  }
+
+  /* faces */  
+  iaux = mmr_get_max_face_id(Mesh_id);
+  for(ient=1;ient<=iaux;ient++){
+    if(mmr_fa_status(Mesh_id,ient)!=MMC_FREE&&mmr_fa_ipid(Mesh_id,ient)<0){
+      mmr_del_face(Mesh_id,ient);
+    }
+  }
+
+  /* edges */ 
+  iaux = mmr_get_max_edge_id(Mesh_id);
+  for(ient=1;ient<=iaux;ient++){
+    if(mmr_edge_status(Mesh_id,ient)!=MMC_FREE&&mmr_ed_ipid(Mesh_id,ient)<0){
+      mmr_del_edge(Mesh_id,ient);
+    }
+  }
+
+  /* vertices */ 
+  iaux = mmr_get_max_node_id(Mesh_id);
+  for(ient=1;ient<=iaux;ient++){
+    if(mmr_node_status(Mesh_id,ient)!=MMC_FREE&&mmr_ve_ipid(Mesh_id,ient)<0){
+      mmr_del_node(Mesh_id,ient);
+    }
+  }
+
+
+
+  /* check consistency */ 
+#ifdef DEBUG_MMM
+  iel=0;
+  while((iel=mmr_get_next_elem_all(Mesh_id, iel))!=0){
+
+    int el_faces[MMC_MAXELFAC+1];
+    int j, ifa, num_edges, fa_edges[5];
+
+    if(mmr_el_ipid(Mesh_id,iel)<0) {
+      printf("element %d, external to %d present in data structure\n",
+	     iel, mmpv_my_proc_id);
+      exit(-1);
+    }
+
+    mmr_el_faces(Mesh_id, iel, el_faces, NULL);
+
+    for(i=0;i<el_faces[0];i++) {
+
+      ifa = el_faces[i+1];
+
+      if(mmr_fa_status(Mesh_id, ifa)==MMC_FREE || mmr_fa_ipid(Mesh_id, ifa)<0){
+
+	printf("element %d, face %d, external to %d present in data structure\n",
+	       iel, ifa, mmpv_my_proc_id);
+	exit(-1);
+      }
+
+      num_edges = mmr_fa_edges(Mesh_id, ifa, fa_edges, NULL);
+
+      for(j=0;j<num_edges;j++){
+
+	ied = fa_edges[j];
+
+	if(mmr_edge_status(Mesh_id,ied)==MMC_FREE||mmr_ed_ipid(Mesh_id,ied)<0){
+	  
+	  printf("element %d, face %d, edge %d, external to %d present in data structure\n",
+		 iel, ifa, ied, mmpv_my_proc_id);
+	  exit(-1);
+	}
+
+      } 
+
+    } 
+
+    mmr_el_node_coor(Mesh_id, iel, el_nodes, NULL);
+
+    for(i=0;i<el_nodes[0];i++){
+
+      ino = el_nodes[i+1];
+
+      if(mmr_node_status(Mesh_id,ino)==MMC_FREE||mmr_ve_ipid(Mesh_id, ino)<0){
+	printf("node %d, external to %d present in data structure\n",
+	       ino, mmpv_my_proc_id);
+	exit(-1);
+      }
+	
+    }
+
+  } 
+#endif
+/*kew*/
+
+  return(0);
+}
+
+
+/*---------------------------------------------------------
+  ddr_add_elem_ovl - to add an element to the overlap with all
+                     its antecedents in a recursive manner
+---------------------------------------------------------*/
+int ddr_add_elem_ovl(
+  int Mesh_id, /* in: mesh ID */
+  int El       /* in: element ID */
+  )
+{
+
+  int i,j,k, ient, ifa, jfa, kfa, nfa, ison, ipid;
+  int iaux, nr_sub, isub, iel, nel, ned, ied, ino, nr_elem, gen_lev, mesh_id;
+  int elsons[MMC_MAXELSONS+1];
+  int el_faces[MMC_MAXELFAC+1];
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+
+  //printf("adding element %d to overlap\n",El);
+
+  /* if element external - indicate inclusion into overlap */
+  ipid=mmr_el_ipid(Mesh_id,El);
+  if(ipid>0) {
+    mmr_el_set_ipid(Mesh_id,El,-ipid);
+  }	
+  else{
+    return(0);
+  }
+
+  /* add faces to overlap */
+  mmr_el_faces(mesh_id, El, el_faces, NULL);
+  
+  for(nfa=0;nfa<el_faces[0];nfa++) {
+	
+    ifa = el_faces[nfa+1];
+
+    ipid=mmr_fa_ipid(Mesh_id,ifa);
+
+/*kbw
+	if((ifa>=1976&&ifa<=1979)||ifa==416){
+	  printf("elem %d, face %d, ipid %d\n",El,ifa,ipid);
+	}
+/*kew*/
+
+
+    if(ipid>0) {
+      ddr_add_face_ovl(Mesh_id,ifa);
+    }
+
+  }
+
+  if(mmr_el_status(mesh_id, El)==MMC_INACTIVE){
+
+    /* add sons to overlap */
+    mmr_el_fam(Mesh_id,El,elsons,NULL);
+    
+    for(ison=1;ison<=elsons[0];ison++){
+      ddr_add_elem_ovl(Mesh_id,elsons[ison]);
+    }
+
+  }
+
+  return(1);
+}
+
+
+/*---------------------------------------------------------
+  ddr_add_face_ovl - to add a face to the overlap with all
+                     its antecedents in a recursive manner
+---------------------------------------------------------*/
+int ddr_add_face_ovl(
+  int Mesh_id, /* in: mesh ID */
+  int Fa       /* in: face ID */
+  )
+{
+
+  int i,j,k, jfa, kfa, ison, ipid;
+  int ned, ied;
+  int num_edges, fa_sons[5], fa_edges[5];
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+
+  //printf("\tadding face %d to overlap\n",Fa);
+
+  ipid=mmr_fa_ipid(Mesh_id,Fa);
+
+
+/*kbw
+	if(Fa>=1976&&Fa<=1979){
+	  printf("adding to overlap face %d, ipid %d\n",Fa,ipid);
+	}
+/*kew*/
+
+  if(ipid>0) {
+    mmr_fa_set_ipid(Mesh_id,Fa,-ipid);
+  }	
+  else{
+    return(0);
+  }
+
+  /* add edges to overlap */
+  num_edges = mmr_fa_edges(Mesh_id, Fa, fa_edges, NULL);
+	  
+  for(ned=0;ned<num_edges;ned++){
+	    
+    ied = fa_edges[ned];
+	
+    ipid=mmr_ed_ipid(Mesh_id,ied);
+    if(ipid>0) {
+      ddr_add_edge_ovl(Mesh_id,ied);
+      }
+
+  }
+
+  /* add children to overlap */
+  if(mmr_fa_status(Mesh_id, Fa)==MMC_INACTIVE){
+
+    mmr_fa_fam(Mesh_id, Fa, fa_sons, NULL);
+
+    for(jfa=1; jfa<=fa_sons[0]; jfa++){
+
+      kfa=fa_sons[jfa];
+
+/*kbw
+	if(kfa>=1976&&kfa<=1979){
+	  printf("father face %d, ipid %d\n",Fa,ipid);
+	}
+/*kew*/
+
+      ipid = mmr_fa_ipid(Mesh_id,kfa);
+
+      if(ipid>0){
+	ddr_add_face_ovl(Mesh_id,kfa);
+	}
+      
+    }
+
+  }
+
+  return(1);
+}
+
+
+/*---------------------------------------------------------
+  ddr_add_edge_ovl - to add an edge to the overlap with all
+                     its antecedents in a recursive manner
+---------------------------------------------------------*/
+int ddr_add_edge_ovl(
+  int Mesh_id, /* in: mesh ID */
+  int Ed       /* in: edge ID */
+  )
+{
+
+  int i,j,k, ison, ipid;
+  int num_edges, edge_sons[2], edge_nodes[2];
+
+/*++++++++++++++++ executable statements ++++++++++++++++*/
+
+  //if(Ed==169) printf("\t\tadding edge %d to overlap\n",Ed);
+
+  ipid=mmr_ed_ipid(Mesh_id,Ed);
+  if(ipid>0) {
+    mmr_ed_set_ipid(Mesh_id,Ed,-ipid);
+  }	
+  else{
+    return(0);
+  }
+
+  /* add nodes to overlap */	      
+  mmr_edge_nodes(Mesh_id, Ed, edge_nodes);
+	      
+  if((i=mmr_ve_ipid(Mesh_id, edge_nodes[0])) > 0){
+    mmr_ve_set_ipid(Mesh_id, edge_nodes[0], -i);
+  }
+  if((i=mmr_ve_ipid(Mesh_id, edge_nodes[1])) > 0){
+    mmr_ve_set_ipid(Mesh_id, edge_nodes[1], -i);
+  }
+  
+  /* add children to overlap */
+  if(mmr_edge_status(Mesh_id, Ed)==MMC_INACTIVE){	      
+
+    mmr_edge_sons(Mesh_id,Ed,edge_sons);
+    ddr_add_edge_ovl(Mesh_id,edge_sons[0]);
+    ddr_add_edge_ovl(Mesh_id,edge_sons[1]);
+
+  }
+
+  return(1);
+}
+

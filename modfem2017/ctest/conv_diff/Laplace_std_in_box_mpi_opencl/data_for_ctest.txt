@@ -1,0 +1,42 @@
+Data from sequential execution:
+
+After reading initial data.
+Parameters (number of active, maximal index):
+Elements: nrel 97792, nmel 111544
+Faces:    nrfa 270304, nmfa 312754
+Edges:    nred 235356, nmed 275441
+Nodes:    nrno 62845, nmno 62845
+
+
+After solving a system of linear equations - norm of residuum =    0.000000058654049
+
+number of owned active elements: 97792
+
+Local number of degrees of freedom: 62845
+Local L2 norm of error      =    0.000000812935954
+Local H1 seminorm of error  =    0.000171669428353
+
+
+Tests:
+
+input_interactive:
+output
+s
+q
+(platform selection must be automatized in some way)
+
+mkb.dat:
+
+1 1 20    	1-single-level GMRES, 1-number of levels, 20-Krylov vectors)
+x y z  		x-preconditioner  y-internal sweep  z-block type: small
+1000 0 1e-12   	100-max_iter, 1-rel_ini conv type, 1e-12 conv treshold
+2 1 0   	2-output level: every iteration, nr_pre and post_smooth steps   
+
+x y z:
+	2 1 1
+	2 1 4
+	4 1 1
+
+go_gbd_ocl:
+
+-np x : x = 1,2,4 (four processes per single GPU is enough...)
